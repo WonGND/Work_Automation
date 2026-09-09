@@ -954,6 +954,26 @@ def compute_red_white_score(rgb) -> float:
     return severity
 
 
+def summarize_weak_zone(image_path: Path) -> tuple[str, int | str, float | str]:
+    """패널 한 장의 weak point 가 3x3 중 어느 영역에 가장 몰렸는지 돌려준다.
+
+    분포도 그림 안에만 있던 "좌상/우상" 정보를 엑셀 셀에도 남겨서
+    정렬·필터·피벗으로 여러 LotID 를 한 번에 훑을 수 있게 한다.
+    """
+    try:
+        analysis = bu_weakpoint_view.analyze_weak_points(
+            image_path, BU_GRID_COLS, BU_GRID_ROWS
+        )
+    except (OSError, ValueError) as error:
+        return f"분석 실패: {error}", "", ""
+
+    dominant = analysis.dominant_zone()
+    if dominant is None:
+        return "없음", 0, 0.0
+    name, info = dominant
+    return name, info["weak_count"], round(info["ratio"], 4)
+
+
 def build_safe_sheet_name(base_name: str, used_names: set[str]) -> str:
     cleaned = re.sub(r"[\\/*?:\[\]]", "_", base_name).strip() or "Sheet"
     candidate = cleaned[:31]
@@ -1436,6 +1456,9 @@ def write_bu_analysis_excel(
             "Worst1",
             "Worst2",
             "Worst3",
+            "Weak 집중 영역",
+            "Weak 셀수",
+            "영역 점유율",
             "분석위치",
             "분석상태",
         ]
@@ -1616,6 +1639,8 @@ def write_bu_analysis_excel(
                     ),
                 )
 
+            zone_name, zone_cells, zone_ratio = summarize_weak_zone(Path(rec["dst"]))
+
             summary_ws.append(
                 [
                     lot_id,
@@ -1629,6 +1654,9 @@ def write_bu_analysis_excel(
                     worst_points[0]["coord"] if len(worst_points) >= 1 else "",
                     worst_points[1]["coord"] if len(worst_points) >= 2 else "",
                     worst_points[2]["coord"] if len(worst_points) >= 3 else "",
+                    zone_name,
+                    zone_cells,
+                    zone_ratio,
                     f"BU_Grid_전체 row {detail_start_row}",
                     "OK",
                 ]
@@ -1735,18 +1763,19 @@ def write_bu_analysis_excel(
         "H": 14,
         "I": 14,
         "J": 14,
-        "K": 24,
+        "K": 14,
         "L": 16,
-        "M": 16,
-        "T": 16,
-        "U": 16,
-        "AB": 16,
-        "AC": 10,
+        "M": 12,
+        "N": 12,
+        "O": 24,
+        "P": 12,
     }.items():
         summary_ws.column_dimensions[col].width = width
 
-    for col in ("A", "D", "L"):
+    for col in ("A", "D", "L", "O"):
         summary_ws[f"{col}1"].font = Font(bold=True)
+    for row_idx in range(2, summary_ws.max_row + 1):
+        summary_ws.cell(row=row_idx, column=14).number_format = "0.0%"
     detail_ws.freeze_panes = "G9"
     for row_idx in range(1, detail_start_row):
         detail_ws.row_dimensions[row_idx].height = DETAIL_ROW_HEIGHT

@@ -66,6 +66,8 @@ wv.render_aggregate_map([analysis], Path("aggregate.png"))
 
 `matplotlib` 이 필요하며, 한글 라벨은 Malgun Gothic → NanumGothic → Noto Sans CJK 순으로 탐색해 적용합니다.
 
+`요약` 시트에는 LotID 행마다 `Weak 집중 영역` / `Weak 셀수` / `영역 점유율` 컬럼이 추가됩니다. 좌상·우상 같은 위치가 그림뿐 아니라 셀 값으로도 남아, 여러 LotID를 정렬·필터·피벗으로 한 번에 훑을 수 있습니다.
+
 ## EXE 빌드
 
 프로젝트 폴더에서 버전 관리되는 spec 파일로 빌드합니다.
