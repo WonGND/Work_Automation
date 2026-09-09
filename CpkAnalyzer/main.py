@@ -20,289 +20,11 @@ import sys
 import numpy as np
 import pandas as pd
 from scipy import stats
-
-import matplotlib
-matplotlib.use("Qt5Agg")
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-
-# -----------------------------------------------------------------------------
-# 한국어 폰트 설정 (OS 별 자동 선택)
-# -----------------------------------------------------------------------------
-def setup_korean_font():
-    import platform
-    system = platform.system()
-    if system == "Windows":
-        font = "Malgun Gothic"
-    elif system == "Darwin":          # macOS
-        font = "AppleGothic"
-    else:                              # Linux
-        font = "NanumGothic"
-    matplotlib.rcParams["font.family"] = font
-    matplotlib.rcParams["axes.unicode_minus"] = False    # 마이너스 깨짐 방지
-
-
-setup_korean_font()
-
-
-# =============================================================================
-#  Toss-style 디자인 토큰 (design.md 기반)
-# =============================================================================
-PRIMARY      = "#0064FF"   # Primary Blue
-PRIMARY_DK   = "#0050CC"
-SUBTLE_GRAY  = "#F2F4F7"   # 보조 배경
-BORDER       = "#E4E7EC"   # 입력 테두리
-TEXT_MAIN    = "#191F28"
-TEXT_SUB     = "#6B7684"
-OK_GREEN     = "#12B886"
-NG_RED       = "#FF3B30"
-
-STYLE_SHEET = f"""
-QMainWindow, QWidget {{
-    background-color: #FFFFFF;
-    color: {TEXT_MAIN};
-    font-family: "Malgun Gothic", "Pretendard", sans-serif;
-    font-size: 13px;
-}}
-QGroupBox {{
-    background-color: #FFFFFF;
-    border: 1px solid {BORDER};
-    border-radius: 18px;
-    margin-top: 14px;
-    padding: 14px 16px 16px 16px;
-    font-weight: 600;
-}}
-QGroupBox::title {{
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    left: 16px;
-    padding: 0 6px;
-    color: {TEXT_SUB};
-}}
-QLabel {{ color: {TEXT_MAIN}; }}
-QLineEdit, QPlainTextEdit, QComboBox {{
-    background-color: #FFFFFF;
-    border: 1px solid {BORDER};
-    border-radius: 12px;
-    padding: 7px 10px;
-    selection-background-color: {PRIMARY};
-}}
-QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {{
-    border: 2px solid {PRIMARY};
-}}
-QComboBox::drop-down {{ border: none; width: 26px; }}
-QComboBox QAbstractItemView {{
-    border: 1px solid {BORDER};
-    border-radius: 8px;
-    selection-background-color: {PRIMARY};
-    selection-color: #FFFFFF;
-    background: #FFFFFF;
-}}
-/* 보조(Secondary) 버튼 */
-QPushButton {{
-    background-color: {SUBTLE_GRAY};
-    color: {TEXT_MAIN};
-    border: none;
-    border-radius: 12px;
-    padding: 8px 14px;
-    font-weight: 600;
-}}
-QPushButton:hover {{ background-color: #E8EBF0; }}
-QPushButton:pressed {{ background-color: #DCE0E8; }}
-/* Primary 버튼 */
-QPushButton#primary {{
-    background-color: {PRIMARY};
-    color: #FFFFFF;
-    padding: 11px;
-    font-size: 14px;
-}}
-QPushButton#primary:hover {{ background-color: {PRIMARY_DK}; }}
-/* 체크박스 */
-QCheckBox {{ color: {TEXT_SUB}; spacing: 6px; }}
-QCheckBox::indicator {{
-    width: 18px; height: 18px;
-    border: 1px solid {BORDER};
-    border-radius: 6px;
-    background: #FFFFFF;
-}}
-QCheckBox::indicator:checked {{
-    background: {PRIMARY};
-    border: 1px solid {PRIMARY};
-    image: none;
-}}
-QSpinBox, QDoubleSpinBox {{
-    background-color: #FFFFFF;
-    border: 1px solid {BORDER};
-    border-radius: 12px;
-    padding: 6px 8px;
-}}
-QSpinBox:focus, QDoubleSpinBox:focus {{ border: 2px solid {PRIMARY}; }}
-QSpinBox::up-button, QSpinBox::down-button,
-QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{ width: 16px; border: none; }}
-QStatusBar {{ color: {TEXT_SUB}; }}
-"""
-
-
-# =============================================================================
-#  통계 계산 모듈
-# =============================================================================
-class CapabilityResult:
-    """공정능력 분석 결과를 담는 데이터 클래스"""
-    def __init__(self, data, lsl, usl):
-        self.data = np.asarray(data, dtype=float)
-        self.data = self.data[~np.isnan(self.data)]   # NaN 제거
-        self.lsl = lsl
-        self.usl = usl
-        self._compute()
-
-    def _compute(self):
-        d = self.data
-        self.n = len(d)
-        if self.n < 2:
-            raise ValueError("분석을 위해 최소 2개 이상의 데이터가 필요합니다.")
-        self.mean = float(np.mean(d))
-        self.std = float(np.std(d, ddof=1))           # 표본 표준편차
-        if self.std <= 0:
-            raise ValueError("표준편차가 0입니다. 데이터 값이 모두 동일합니다.")
-
-        # Cp / Cpk
-        self.cp = (self.usl - self.lsl) / (6.0 * self.std)
-        cpu = (self.usl - self.mean) / (3.0 * self.std)
-        cpl = (self.mean - self.lsl) / (3.0 * self.std)
-        self.cpk = min(cpu, cpl)
-
-        # PPM (규격 이탈 확률)
-        p_below = stats.norm.cdf(self.lsl, self.mean, self.std)
-        p_above = 1.0 - stats.norm.cdf(self.usl, self.mean, self.std)
-        self.ppm = (p_below + p_above) * 1_000_000
-
-
-# =============================================================================
-#  Matplotlib 캔버스 (PyQt5 임베딩)
-# =============================================================================
-class MplCanvas(FigureCanvas):
-    def __init__(self, parent=None):
-        self.fig = Figure(figsize=(8, 5), dpi=100, facecolor="white")
-        self.ax = self.fig.add_subplot(111)
-        super().__init__(self.fig)
-        self.setParent(parent)
-        self.fig.tight_layout()
-
-
-# =============================================================================
-#  컬러 선택 버튼 (배경은 항상 흰색, 선택색은 작은 스와치 칩으로 표시)
-# =============================================================================
-class ColorButton(QtWidgets.QPushButton):
-    colorChanged = QtCore.pyqtSignal()
-
-    def __init__(self, color="#6699CC"):
-        super().__init__()
-        self._color = color
-        self.setFixedWidth(110)
-        self.setCursor(QtCore.Qt.PointingHandCursor)
-        self.clicked.connect(self._pick_color)
-        self._refresh()
-
-    def _pick_color(self):
-        col = QtWidgets.QColorDialog.getColor(QtGui.QColor(self._color), self,
-                                              "색상 선택")
-        if col.isValid():
-            self._color = col.name()
-            self._refresh()
-            self.colorChanged.emit()
-
-    def _refresh(self):
-        # 항상 흰 배경 + 좌측 색상 스와치 칩 + HEX 텍스트
-        self.setStyleSheet(
-            "QPushButton{background:#FFFFFF; border:1px solid %s;"
-            "border-radius:12px; padding:6px 10px; text-align:left;"
-            "color:%s; font-weight:600;}"
-            "QPushButton:hover{border:1px solid %s;}" % (BORDER, TEXT_MAIN, PRIMARY)
-        )
-        # 스와치 아이콘 생성
-        pix = QtGui.QPixmap(16, 16)
-        pix.fill(QtCore.Qt.transparent)
-        p = QtGui.QPainter(pix)
-        p.setRenderHint(QtGui.QPainter.Antialiasing)
-        p.setBrush(QtGui.QColor(self._color))
-        p.setPen(QtGui.QColor(BORDER))
-        p.drawRoundedRect(0, 0, 15, 15, 4, 4)
-        p.end()
-        self.setIcon(QtGui.QIcon(pix))
-        self.setIconSize(QtCore.QSize(16, 16))
-        self.setText("  " + self._color)
-
-    def color(self):
-        return self._color
-
-
-# =============================================================================
-#  마우스 인터랙션 (범례 / 통계박스: 드래그=이동, 스크롤=크기 조절)
-# =============================================================================
-class BoxInteractor:
-    def __init__(self, win, canvas):
-        self.win = win
-        self.canvas = canvas
-        self.legend = None
-        self.stat_text = None
-        self.drag_target = None
-        self.press_xy = None
-        canvas.mpl_connect("button_press_event", self.on_press)
-        canvas.mpl_connect("button_release_event", self.on_release)
-        canvas.mpl_connect("motion_notify_event", self.on_motion)
-        canvas.mpl_connect("scroll_event", self.on_scroll)
-
-    def set_artists(self, legend, stat_text):
-        self.legend = legend
-        self.stat_text = stat_text
-
-    def _hit(self, artist, event):
-        if artist is None or event.x is None:
-            return False
-        try:
-            bbox = artist.get_window_extent()
-        except Exception:
-            return False
-        return bbox.contains(event.x, event.y)
-
-    def on_press(self, event):
-        if self._hit(self.stat_text, event):
-            self.drag_target = "stat"
-        elif self._hit(self.legend, event):
-            self.drag_target = "legend"
-        else:
-            self.drag_target = None
-            return
-        self.press_xy = (event.x, event.y)
-
-    def on_release(self, event):
-        self.drag_target = None
-        self.press_xy = None
-
-    def on_motion(self, event):
-        if self.drag_target is None or event.x is None or self.press_xy is None:
-            return
-        box = self.win.canvas.ax.get_window_extent()
-        dx = (event.x - self.press_xy[0]) / box.width
-        dy = (event.y - self.press_xy[1]) / box.height
-        self.press_xy = (event.x, event.y)
-        if self.drag_target == "stat":
-            self.win.stat_pos[0] += dx
-            self.win.stat_pos[1] += dy
-        else:
-            self.win.legend_anchor[0] += dx
-            self.win.legend_anchor[1] += dy
-        self.win.draw_chart()
-
-    def on_scroll(self, event):
-        step = 1 if event.button == "up" else -1
-        if self._hit(self.stat_text, event):
-            self.win.spn_stat.setValue(self.win.spn_stat.value() + step)
-        elif self._hit(self.legend, event):
-            self.win.spn_legend.setValue(self.win.spn_legend.value() + step)
+from stats_core import CapabilityResult
+from theme import NG_RED, OK_GREEN, STYLE_SHEET, TEXT_MAIN, TEXT_SUB
+from widgets import BoxInteractor, ColorButton, MplCanvas
 
 
 # =============================================================================
@@ -316,8 +38,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.df = None                 # 로드된 DataFrame
         self.result = None             # 최근 분석 결과
+        self._curve_cache = None
         self.legend_anchor = [0.01, 0.99]   # 범례 위치 (드래그로 이동)
         self.stat_pos = [0.98, 0.98]        # 통계박스 위치 (드래그로 이동)
+
+        self._redraw_timer = QtCore.QTimer(self)
+        self._redraw_timer.setSingleShot(True)
+        self._redraw_timer.setInterval(140)
+        self._redraw_timer.timeout.connect(self._draw_if_ready_now)
+
+        self._drag_redraw_timer = QtCore.QTimer(self)
+        self._drag_redraw_timer.setSingleShot(True)
+        self._drag_redraw_timer.setInterval(16)
+        self._drag_redraw_timer.timeout.connect(self._draw_if_ready_now)
 
         self._build_ui()
 
@@ -493,6 +226,31 @@ class MainWindow(QtWidgets.QMainWindow):
         return c
 
     # --------------------------------------------------------------- 파일 로드
+    @staticmethod
+    def _read_csv(path):
+        """국내 설비 CSV는 cp949/euc-kr 인 경우가 많아 인코딩을 순서대로 시도한다."""
+        last_error = None
+        for encoding in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
+            try:
+                return pd.read_csv(path, encoding=encoding)
+            except UnicodeDecodeError as error:
+                last_error = error
+        raise UnicodeError(
+            "지원하는 인코딩(utf-8-sig, utf-8, cp949, euc-kr)으로 읽지 못했습니다."
+        ) from last_error
+
+    def _clear_loaded_state(self):
+        self._redraw_timer.stop()
+        self._drag_redraw_timer.stop()
+        self.df = None
+        self.result = None
+        self._curve_cache = None
+        self.cmb_column.clear()
+        self.interactor.set_artists(None, None)
+        self.canvas.ax.clear()
+        self.canvas.draw()
+        self.statusBar().showMessage("새 파일을 불러오는 중...")
+
     def load_file(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "데이터 파일 선택", "",
@@ -500,51 +258,76 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not path:
             return
+        self._clear_loaded_state()
         try:
             if path.lower().endswith(".csv"):
-                self.df = pd.read_csv(path)
+                loaded_df = self._read_csv(path)
             else:
-                self.df = pd.read_excel(path)
-        except Exception as e:
+                loaded_df = pd.read_excel(path)
+        except Exception as error:
+            self.statusBar().showMessage(f"파일 로드 실패: {path}")
             QtWidgets.QMessageBox.critical(self, "파일 로드 실패",
-                                           f"파일을 읽을 수 없습니다.\n\n{e}")
+                                           f"파일을 읽을 수 없습니다.\n\n{error}")
             return
 
-        numeric_cols = [c for c in self.df.columns
-                        if pd.api.types.is_numeric_dtype(self.df[c])]
-        if not numeric_cols:
+        numeric_columns = []
+        for index, column in enumerate(loaded_df.columns):
+            if pd.api.types.is_numeric_dtype(loaded_df.iloc[:, index]):
+                numeric_columns.append((index, column))
+        if not numeric_columns:
+            self.statusBar().showMessage("파일 로드 실패 — 숫자형 컬럼이 없습니다.")
             QtWidgets.QMessageBox.warning(self, "경고", "숫자형 컬럼이 없습니다.")
             return
-        self.cmb_column.clear()
-        self.cmb_column.addItems([str(c) for c in numeric_cols])
+
+        self.df = loaded_df
+        for index, column in numeric_columns:
+            self.cmb_column.addItem(str(column), userData=(index, column))
         self.statusBar().showMessage(
-            f"로드 완료: {path}  (행 {len(self.df)}개, 숫자컬럼 {len(numeric_cols)}개)")
+            f"로드 완료: {path}  (행 {len(self.df)}개, 숫자컬럼 {len(numeric_columns)}개)")
 
     # ----------------------------------------------------------- 데이터 취득
+    @staticmethod
+    def _parse_manual_data(manual_text):
+        raw = manual_text.replace("\n", ",").replace("\t", ",")
+        tokens = [token.strip() for token in raw.split(",") if token.strip()]
+        values = []
+        for token in tokens:
+            try:
+                value = float(token)
+            except ValueError:
+                continue
+            if np.isfinite(value):
+                values.append(value)
+        return np.asarray(values)
+
     def _get_data(self):
         manual_text = self.txt_manual.toPlainText().strip()
-        if self.df is not None and self.cmb_column.currentText():
-            col = self.cmb_column.currentText()
-            col_key = None
-            for c in self.df.columns:
-                if str(c) == col:
-                    col_key = c
-                    break
-            if col_key is not None:
-                return pd.to_numeric(self.df[col_key],
-                                     errors="coerce").dropna().values
+        file_value_count = None
+        if self.df is not None and self.cmb_column.currentData() is not None:
+            column_index, _column = self.cmb_column.currentData()
+            series = pd.to_numeric(self.df.iloc[:, column_index], errors="coerce")
+            file_values = np.asarray(series, dtype=float)
+            file_values = file_values[np.isfinite(file_values)]
+            file_value_count = len(file_values)
+            if file_value_count >= 2:
+                return file_values
+
         if manual_text:
-            raw = manual_text.replace("\n", ",").replace("\t", ",")
-            tokens = [t.strip() for t in raw.split(",") if t.strip()]
-            vals = []
-            for t in tokens:
-                try:
-                    vals.append(float(t))
-                except ValueError:
-                    continue
-            if not vals:
-                raise ValueError("수동 입력에서 유효한 숫자를 찾지 못했습니다.")
-            return np.array(vals)
+            manual_values = self._parse_manual_data(manual_text)
+            if len(manual_values) >= 2:
+                return manual_values
+            if file_value_count is not None:
+                raise ValueError(
+                    "선택한 파일 컬럼과 수동 입력 모두 유효한 숫자 데이터가 "
+                    "2개 미만입니다."
+                )
+            raise ValueError("수동 입력에 유효한 숫자 데이터가 2개 이상 필요합니다.")
+
+        if file_value_count is not None:
+            raise ValueError(
+                "선택한 파일 컬럼에 유효한 숫자 데이터가 2개 미만입니다. "
+                "다른 컬럼을 선택하거나 수동 입력을 작성하세요."
+            )
         raise ValueError("데이터가 없습니다. 파일을 불러오거나 수동 입력을 작성하세요.")
 
     def _get_params(self):
@@ -568,25 +351,46 @@ class MainWindow(QtWidgets.QMainWindow):
     # --------------------------------------------------------------- 분석 실행
     def run_analysis(self):
         try:
+            self._redraw_timer.stop()
+            self._drag_redraw_timer.stop()
             data = self._get_data()
             lsl, usl, cpk_crit, xmin, xmax = self._get_params()
             self.result = CapabilityResult(data, lsl, usl)
             self._cpk_crit = cpk_crit
             self._xrange = (xmin, xmax)
+            self._curve_cache = None
             self.draw_chart()
             verdict = "OK" if self.result.cpk >= cpk_crit else "NG"
             self.statusBar().showMessage(
                 f"분석 완료 — N={self.result.n}, Cpk={self.result.cpk:.3f} -> {verdict}")
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "분석 오류", str(e))
+        except Exception as error:
+            QtWidgets.QMessageBox.critical(self, "분석 오류", str(error))
 
-    def redraw_if_ready(self):
+    def redraw_if_ready(self, *_args):
+        if self.result is not None:
+            self._redraw_timer.start()
+
+    def schedule_drag_redraw(self):
+        if self.result is not None and not self._drag_redraw_timer.isActive():
+            self._drag_redraw_timer.start()
+
+    def _draw_if_ready_now(self):
         if self.result is not None:
             self.draw_chart()
+
+    def _get_curve_data(self, result, xmin, xmax):
+        cache_key = (id(result), xmin, xmax)
+        if self._curve_cache is None or self._curve_cache[0] != cache_key:
+            xs = np.linspace(xmin, xmax, 400)
+            ys = stats.norm.pdf(xs, result.mean, result.std)
+            self._curve_cache = (cache_key, xs, ys)
+        return self._curve_cache[1], self._curve_cache[2]
 
     # --------------------------------------------------------------- 차트 그리기
     def draw_chart(self):
         r = self.result
+        if r is None:
+            return
         ax = self.canvas.ax
         ax.clear()
 
@@ -602,19 +406,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 label="Observed")
 
         # 정규분포 피팅 곡선
-        xs = np.linspace(xmin, xmax, 400)
-        ys = stats.norm.pdf(xs, r.mean, r.std)
+        xs, ys = self._get_curve_data(r, xmin, xmax)
         ax.plot(xs, ys, color=c_curve, lw=2.4, label="Normal Fit")
 
         # NG 음영 (체크박스 ON 시에만)
         if self.chk_ng_fill.isChecked():
-            left = xs[xs <= r.lsl]
-            right = xs[xs >= r.usl]
-            if len(left):
-                ax.fill_between(left, stats.norm.pdf(left, r.mean, r.std),
+            left_mask = xs <= r.lsl
+            right_mask = xs >= r.usl
+            if np.any(left_mask):
+                ax.fill_between(xs[left_mask], ys[left_mask],
                                 color=c_ng, alpha=0.7)
-            if len(right):
-                ax.fill_between(right, stats.norm.pdf(right, r.mean, r.std),
+            if np.any(right_mask):
+                ax.fill_between(xs[right_mask], ys[right_mask],
                                 color=c_ng, alpha=0.7)
 
         # LSL / USL 점선
@@ -686,7 +489,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "알림",
                                               "먼저 '분석 실행'을 수행하세요.")
             return
-        path, sel = QtWidgets.QFileDialog.getSaveFileName(
+        path, _selected_filter = QtWidgets.QFileDialog.getSaveFileName(
             self, "이미지 저장", "capability_chart.png",
             "PNG 이미지 (*.png);;JPG 이미지 (*.jpg);;SVG 벡터 (*.svg)"
         )
@@ -699,8 +502,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(f"저장 완료: {path}  ({dpi} dpi)")
             QtWidgets.QMessageBox.information(self, "저장 완료",
                                               f"이미지를 저장했습니다.\n{path}")
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "저장 실패", str(e))
+        except Exception as error:
+            QtWidgets.QMessageBox.critical(self, "저장 실패", str(error))
 
 
 # =============================================================================
@@ -717,25 +520,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# =============================================================================
-#  README - PyInstaller .exe 빌드 방법
-# -----------------------------------------------------------------------------
-#  1) 가상환경 생성 및 패키지 설치
-#       python -m venv venv
-#       venv\Scripts\activate            (Windows)
-#       pip install -r requirements.txt
-#       pip install pyinstaller
-#
-#  2) 단일 실행파일(.exe) 빌드  (콘솔창 숨김)
-#       pyinstaller --onefile --windowed --icon=assets/app.ico main.py
-#
-#  3) scipy/matplotlib 누락 오류 시 hidden-import 추가:
-#       pyinstaller --onefile --windowed ^
-#           --hidden-import=scipy.special.cython_special ^
-#           --hidden-import=scipy._lib.messagestream ^
-#           --icon=assets/app.ico main.py
-#
-#  4) 결과물: dist/main.exe
-# =============================================================================

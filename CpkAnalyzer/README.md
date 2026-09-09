@@ -4,6 +4,7 @@ Minitab 스타일의 Cp/Cpk 공정능력 분석 GUI 데스크탑 프로그램입
 
 ## 주요 기능
 - Excel/CSV 파일 로드 및 컬럼 선택, 수동 데이터 입력
+- UTF-8 및 CP949/EUC-KR CSV 인코딩 자동 감지
 - LSL/USL, Cpk 기준, 제목/X축 라벨/X축 범위 설정
 - 히스토그램 + 정규분포 피팅 + LSL/USL 점선 + NG 음영
 - 통계 박스: N, Mean, StDev, Cp, Cpk, PPM
@@ -20,6 +21,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
+`main.py`가 실행 진입점이며, 디자인 토큰은 `theme.py`, 통계 계산은
+`stats_core.py`, 차트 위젯과 마우스 상호작용은 `widgets.py`에 분리되어 있습니다.
+
 ## 마우스 조작
 | 조작 | 대상 | 동작 |
 |---|---|---|
@@ -34,6 +38,9 @@ pyinstaller --onefile --windowed --icon=assets/app.ico ^
     --hidden-import=scipy._lib.messagestream main.py
 ```
 결과물: `dist/main.exe`
+
+> `theme.py` / `stats_core.py` / `widgets.py` 는 `main.py` 와 같은 폴더의 일반 모듈이라
+> PyInstaller가 자동으로 수집합니다. 반드시 `CpkAnalyzer/` 폴더 안에서 빌드하세요.
 
 ## 수식
 ```
