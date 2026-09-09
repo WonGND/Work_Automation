@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 build/
 dist/
-*.spec
 venv/
 .env/
+
+# 빌드 설정은 재현성을 위해 버전 관리하고, 그 외 생성된 spec 만 무시한다.
+*.spec
+!CpkAnalyzer.spec
