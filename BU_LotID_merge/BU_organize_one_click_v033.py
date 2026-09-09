@@ -3,6 +3,7 @@ import io
 import os
 import re
 import shutil
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -1721,7 +1722,7 @@ def write_bu_analysis_excel(
             summary_ws.cell(row=anchor_row, column=1, value=title).font = Font(
                 size=13, bold=True, color="111827"
             )
-            image = XLImage(str(path))
+            image = XLImage(io.BytesIO(Path(path).read_bytes()))
             if image.width > max_width:
                 ratio = max_width / image.width
                 image.width = int(image.width * ratio)
@@ -1733,7 +1734,6 @@ def write_bu_analysis_excel(
         image_row = place_image(summary_overlay_path, "Worst Point Count Overlay", image_row)
         image_row = place_image(summary_heatmap_path, "Worst Point Heatmap", image_row)
 
-        distribution_path = analysis_excel_path.with_name("bu_weak_point_distribution.png")
         try:
             aggregate_analyses = []
             for rec in bu_records:
@@ -1746,10 +1746,12 @@ def write_bu_analysis_excel(
                 if analysis.valid_cell_count:
                     aggregate_analyses.append(analysis)
             if aggregate_analyses:
-                bu_weakpoint_view.render_aggregate_map(aggregate_analyses, distribution_path)
-                image_row = place_image(
-                    distribution_path, "Weak Point 위치 분포", image_row, max_width=900
-                )
+                with tempfile.TemporaryDirectory(prefix="bu_weak_") as temp_dir:
+                    distribution_path = Path(temp_dir) / "bu_weak_point_distribution.png"
+                    bu_weakpoint_view.render_aggregate_map(aggregate_analyses, distribution_path)
+                    image_row = place_image(
+                        distribution_path, "Weak Point 위치 분포", image_row, max_width=900
+                    )
         except (OSError, ValueError, ImportError) as exc:
             print(f"  weak point 분포도 생성 실패: {exc}")
     for col, width in {
