@@ -1,47 +1,16 @@
-import io
-import re
 import shutil
 from pathlib import Path
 
-import numpy as np
 from openpyxl import Workbook
-from openpyxl.drawing.image import Image as XLImage
 from PIL import Image
 
-# 처리 대상 이미지 확장자
-ALLOWED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
-# 파일명에서 LotID/종류(BU, WU)를 뽑기 위한 패턴
-LOT_PATTERN = re.compile(r"^(?P<lotid>.+)_(?P<kind>BU|WU)_\d+$", re.IGNORECASE)
-
-
-def get_resized_xl_image(image_path: Path, max_width_px: int) -> XLImage | None:
-    # 엑셀 파일 용량 다이어트를 위해 삽입 전에 이미지를 리사이징하여 BytesIO로 반환
-    if not image_path.exists():
-        return None
-    try:
-        with Image.open(image_path) as img:
-            w, h = img.size
-            if w > max_width_px:
-                ratio = max_width_px / w
-                new_w, new_h = int(w * ratio), int(h * ratio)
-                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-            
-            img_byte_arr = io.BytesIO()
-            img.save(img_byte_arr, format="PNG")
-            img_byte_arr.seek(0)
-            return XLImage(img_byte_arr)
-    except Exception as e:
-        print(f"Error resizing image {image_path}: {e}")
-        return None
-
-
-def print_progress(label: str, current: int, total: int, done: bool = False) -> None:
-    # 진행률 표시 공통 함수
-    if total <= 0:
-        return
-    percent = (current / total) * 100
-    end = "\n" if done else "\r"
-    print(f"{label}: {current}/{total} ({percent:5.1f}%)", end=end, flush=True)
+from bu_common import (
+    ALLOWED_EXTENSIONS,
+    find_non_black_bbox,
+    get_resized_xl_image,
+    parse_lot_kind,
+    print_progress,
+)
 
 
 def unique_file_path(path: Path) -> Path:
@@ -68,21 +37,6 @@ def ask_int(prompt: str, default: int) -> int:
     return int(raw)
 
 
-def find_non_black_bbox(img: Image.Image, threshold: int = 12):
-    # 검은 배경(저밝기)을 제외한 영역의 최소 사각형(BBox) 검출 (NumPy 최적화 버전)
-    arr = np.array(img.convert("L"))
-    rows = np.any(arr > threshold, axis=1)
-    cols = np.any(arr > threshold, axis=0)
-
-    if not np.any(rows) or not np.any(cols):
-        return None
-
-    min_y, max_y = np.where(rows)[0][[0, -1]]
-    min_x, max_x = np.where(cols)[0][[0, -1]]
-
-    return int(min_x), int(min_y), int(max_x + 1), int(max_y + 1)
-
-
 def add_padding(box, w: int, h: int, pad: int):
     # 잘림 방지를 위해 크롭 박스에 여백(padding) 추가
     left, top, right, bottom = box
@@ -92,15 +46,6 @@ def add_padding(box, w: int, h: int, pad: int):
         min(w, right + pad),
         min(h, bottom + pad),
     )
-
-
-def parse_lot_kind(stem: str):
-    # 파일명에서 LotID와 BU/WU를 파싱
-    # 패턴 불일치 시 kind=UNKNOWN으로 처리
-    m = LOT_PATTERN.match(stem)
-    if not m:
-        return stem, "UNKNOWN"
-    return m.group("lotid"), m.group("kind").upper()
 
 
 def crop_images(input_root: Path, output_root: Path, threshold: int, padding: int):
@@ -177,6 +122,8 @@ def write_excel(records, excel_path: Path, image_width_px: int = 240):
     # 상세 시트: 경로/중복 정보 정리 (이미지 없음)
     wb = Workbook()
     ws = wb.active
+    if ws is None:
+        raise RuntimeError("엑셀 결과 시트를 만들지 못했습니다.")
     ws.title = "결과"
     ws.append(["LotID", "판정", "BU data", "BU Image", "WU data", "WU Image"])
 

@@ -3,17 +3,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-# 처리 대상 이미지 확장자 (필요하면 여기서 추가/삭제)
-ALLOWED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
-
-
-def print_progress(label: str, current: int, total: int, done: bool = False) -> None:
-    # 진행률 표시 공통 함수
-    if total <= 0:
-        return
-    percent = (current / total) * 100
-    end = "\n" if done else "\r"
-    print(f"{label}: {current}/{total} ({percent:5.1f}%)", end=end, flush=True)
+from bu_common import ALLOWED_EXTENSIONS, print_progress
 
 
 def unique_folder_path(base_dir: Path, folder_name: str) -> Path:

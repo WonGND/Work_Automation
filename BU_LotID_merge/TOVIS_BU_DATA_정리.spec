@@ -27,11 +27,11 @@ for source, target in (
         datas.append((str(source), target))
 
 a = Analysis(
-    ['BU_organize_gui_v03.py'],
+    ['BU_organize_gui.py'],
     pathex=[str(project_dir)],
     binaries=binaries,
     datas=datas,
-    hiddenimports=['tkinter', '_tkinter', 'cv2'],
+    hiddenimports=['tkinter', '_tkinter', 'bu_pipeline', 'bu_common'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -47,7 +47,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='TOVIS_BU_DATA_정리_v0.3',
+    name='TOVIS_BU_DATA_정리',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

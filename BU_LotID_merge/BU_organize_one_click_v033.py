@@ -1,4 +1,4 @@
-﻿import csv
+import csv
 import io
 import os
 import re
@@ -18,6 +18,8 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.utils import get_column_letter
 from PIL import Image, ImageDraw
 
+import bu_weakpoint_view
+
 # 처리 대상 이미지 확장자
 ALLOWED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
 # 파일명에서 LotID/종류(BU, WU)를 뽑기 위한 패턴
@@ -28,6 +30,8 @@ WU_SPEC_MIN = 80.0
 BU_GRID_COLS = 48
 BU_GRID_ROWS = 27
 DETAIL_ROW_HEIGHT = 22
+# 엑셀 기본 행 높이(px). 삽입 이미지가 몇 행을 차지하는지 환산할 때 쓴다.
+DEFAULT_ROW_HEIGHT_PX = 20
 INNER_TRIM_VARIANTS = (5,)
 WORST_POINT_EDGE_MARGIN_CELLS_X = 2
 WORST_POINT_EDGE_MARGIN_CELLS_Y = 2
@@ -936,12 +940,38 @@ def compute_luminance(rgb) -> float:
 
 
 def compute_red_white_score(rgb) -> float:
-    r, g, b = rgb[:3]
-    brightness = compute_luminance(rgb) / 255.0
-    redness = max(0.0, r - max(g, b)) / 255.0
-    whiteness = (min(r, g, b) / 255.0) * brightness
-    green_penalty = max(0.0, g - r) / 255.0
-    return (redness * 2.2) + (whiteness * 1.4) + (brightness * 0.2) - (green_penalty * 1.0)
+    """계측기 컬러맵 상의 위치를 그대로 심각도(0 양호 ~ 1 불량)로 쓴다.
+
+    이전 구현은 휘도와 붉은 정도를 가중합했는데 컬러맵 순서와 어긋났다.
+    실측하면 파랑(가장 양호) 0.014 > 초록(중간) -0.857 로 역전되고,
+    계측기가 얹은 흰색 글자가 1.600 으로 주황보다 높게 잡혀 오검출됐다.
+    색상환 각도로 환산하면 파랑 0 → 청록 .25 → 초록 .5 → 노랑 .75 → 빨강 1 로
+    단조증가하며, 무채색(흰 글자·회색 UI)과 배경은 후보에서 빠진다.
+    """
+    severity = bu_weakpoint_view.severity_from_rgb(rgb)
+    if severity is None:
+        return float("-inf")
+    return severity
+
+
+def summarize_weak_zone(image_path: Path) -> tuple[str, int | str, float | str]:
+    """패널 한 장의 weak point 가 3x3 중 어느 영역에 가장 몰렸는지 돌려준다.
+
+    분포도 그림 안에만 있던 "좌상/우상" 정보를 엑셀 셀에도 남겨서
+    정렬·필터·피벗으로 여러 LotID 를 한 번에 훑을 수 있게 한다.
+    """
+    try:
+        analysis = bu_weakpoint_view.analyze_weak_points(
+            image_path, BU_GRID_COLS, BU_GRID_ROWS
+        )
+    except (OSError, ValueError) as error:
+        return f"분석 실패: {error}", "", ""
+
+    dominant = analysis.dominant_zone()
+    if dominant is None:
+        return "없음", 0, 0.0
+    name, info = dominant
+    return name, info["weak_count"], round(info["ratio"], 4)
 
 
 def build_safe_sheet_name(base_name: str, used_names: set[str]) -> str:
@@ -1321,6 +1351,7 @@ def build_summary_worst_heatmap(
 
     df = pd.DataFrame(records)
     plt.style.use("dark_background")
+    bu_weakpoint_view.apply_korean_font()
     fig, ax = plt.subplots(figsize=(14, 8), dpi=150)
     ax.set_facecolor("#000000")
     fig.patch.set_facecolor("#000000")
@@ -1336,7 +1367,7 @@ def build_summary_worst_heatmap(
     count_max = counts.max() if len(counts) else 1.0
     count_range = max(1e-6, count_max - count_min)
     norm_counts = (counts - count_min) / count_range
-    cmap = plt.cm.get_cmap("magma")
+    cmap = matplotlib.colormaps["magma"]
     colors = cmap(0.35 + (norm_counts * 0.65))
 
     # 바깥 glow
@@ -1425,6 +1456,9 @@ def write_bu_analysis_excel(
             "Worst1",
             "Worst2",
             "Worst3",
+            "Weak 집중 영역",
+            "Weak 셀수",
+            "영역 점유율",
             "분석위치",
             "분석상태",
         ]
@@ -1445,7 +1479,7 @@ def write_bu_analysis_excel(
     detail_ws["A6"] = "Grid Data"
     detail_ws["B6"] = "최적화된 제품영역 + 5px 내부 축소 영역"
     detail_ws["A7"] = "Worst Point 기준"
-    detail_ws["B7"] = "빨강/흰색 성분 우선 + 제품 content 비율 기준"
+    detail_ws["B7"] = "계측기 컬러맵 색상환 심각도(파랑0→빨강1) + 제품 content 비율 기준"
 
     bu_records = [
         rec for rec in records
@@ -1605,6 +1639,8 @@ def write_bu_analysis_excel(
                     ),
                 )
 
+            zone_name, zone_cells, zone_ratio = summarize_weak_zone(Path(rec["dst"]))
+
             summary_ws.append(
                 [
                     lot_id,
@@ -1618,6 +1654,9 @@ def write_bu_analysis_excel(
                     worst_points[0]["coord"] if len(worst_points) >= 1 else "",
                     worst_points[1]["coord"] if len(worst_points) >= 2 else "",
                     worst_points[2]["coord"] if len(worst_points) >= 3 else "",
+                    zone_name,
+                    zone_cells,
+                    zone_ratio,
                     f"BU_Grid_전체 row {detail_start_row}",
                     "OK",
                 ]
@@ -1629,27 +1668,31 @@ def write_bu_analysis_excel(
             print_progress("  BU 분석 진행", idx, total, done=(idx == total))
 
     summary_ws.freeze_panes = "A2"
-    summary_ws["L2"] = "크롭 기준"
-    summary_ws["M2"] = "검은색 제외 영역의 최소 사각형(BBox) + padding"
-    summary_ws["L3"] = "Grid 기준"
-    summary_ws["M3"] = f"{BU_GRID_COLS} x {BU_GRID_ROWS}"
-    summary_ws["L4"] = "편차 부호"
-    summary_ws["M4"] = "밝음=- / 어두움=+"
-    summary_ws["L5"] = "비검정 기준"
-    summary_ws["M5"] = f"밝기 > threshold({threshold})"
-    summary_ws["L6"] = "Grid Data 기준"
-    summary_ws["M6"] = "최적화 제품영역 + 5px 내부 축소"
-    summary_ws["L7"] = "Worst Point 기준"
-    summary_ws["M7"] = "빨강/흰색 성분 우선 + 제품 content 비율 기준"
-    summary_ws["AB2"] = "Worst Point Frequency"
-    summary_ws["AB3"] = "Coord"
-    summary_ws["AC3"] = "Count"
+
+    # 데이터 표는 A~M 열을 쓰므로, 범례와 이미지는 마지막 데이터 행 아래에 배치한다.
+    # 이전에는 L1~M7 에 직접 써서 "분석위치" 헤더와 상위 데이터 행을 덮어썼다.
+    legend_row = summary_ws.max_row + 2
+    for offset, (label, value) in enumerate((
+        ("크롭 기준", "검은색 제외 영역의 최소 사각형(BBox) + padding"),
+        ("Grid 기준", f"{BU_GRID_COLS} x {BU_GRID_ROWS}"),
+        ("편차 부호", "밝음=- / 어두움=+"),
+        ("비검정 기준", f"밝기 > threshold({threshold})"),
+        ("Grid Data 기준", "최적화 제품영역 + 5px 내부 축소"),
+        ("Worst Point 기준", "계측기 컬러맵 색상환 심각도(파랑0→빨강1) + 제품 content 비율 기준"),
+    )):
+        summary_ws.cell(row=legend_row + offset, column=1, value=label).font = Font(bold=True)
+        summary_ws.cell(row=legend_row + offset, column=2, value=value)
+
+    freq_row = legend_row + 8
+    summary_ws.cell(row=freq_row, column=1, value="Worst Point Frequency").font = Font(size=13, bold=True, color="111827")
+    summary_ws.cell(row=freq_row + 1, column=1, value="Coord").font = Font(bold=True)
+    summary_ws.cell(row=freq_row + 1, column=2, value="Count").font = Font(bold=True)
     for idx, (coord, count) in enumerate(
         sorted(worst_point_frequency.items(), key=lambda item: (-item[1], item[0])),
-        start=4,
+        start=freq_row + 2,
     ):
-        summary_ws.cell(row=idx, column=28, value=coord)
-        summary_ws.cell(row=idx, column=29, value=count)
+        summary_ws.cell(row=idx, column=1, value=coord)
+        summary_ws.cell(row=idx, column=2, value=count)
 
     if summary_overlay_base is not None and summary_overlay_analysis is not None and all_worst_points:
         summary_overlay_path = analysis_excel_path.with_name("bu_worst_points_summary_counts.png")
@@ -1674,22 +1717,41 @@ def write_bu_analysis_excel(
             label_mode="count_only",
         )
         build_summary_worst_heatmap(summary_overlay_base, summary_overlay_analysis, aggregate_points, summary_heatmap_path)
-        summary_ws["L1"] = "Worst Point Count Overlay"
-        summary_ws["L1"].font = Font(size=13, bold=True, color="111827")
-        overlay_img = XLImage(str(summary_overlay_path))
-        if overlay_img.width > 420:
-            ratio = 420 / overlay_img.width
-            overlay_img.width = int(overlay_img.width * ratio)
-            overlay_img.height = int(overlay_img.height * ratio)
-        summary_ws.add_image(overlay_img, "L2")
-        summary_ws["T1"] = "Worst Point Heatmap"
-        summary_ws["T1"].font = Font(size=13, bold=True, color="111827")
-        heatmap_img = XLImage(str(summary_heatmap_path))
-        if heatmap_img.width > 420:
-            ratio = 420 / heatmap_img.width
-            heatmap_img.width = int(heatmap_img.width * ratio)
-            heatmap_img.height = int(heatmap_img.height * ratio)
-        summary_ws.add_image(heatmap_img, "T2")
+        def place_image(path: Path, title: str, anchor_row: int, max_width: int = 640) -> int:
+            summary_ws.cell(row=anchor_row, column=1, value=title).font = Font(
+                size=13, bold=True, color="111827"
+            )
+            image = XLImage(str(path))
+            if image.width > max_width:
+                ratio = max_width / image.width
+                image.width = int(image.width * ratio)
+                image.height = int(image.height * ratio)
+            summary_ws.add_image(image, f"A{anchor_row + 1}")
+            return anchor_row + 3 + (image.height // DEFAULT_ROW_HEIGHT_PX)
+
+        image_row = summary_ws.max_row + 2
+        image_row = place_image(summary_overlay_path, "Worst Point Count Overlay", image_row)
+        image_row = place_image(summary_heatmap_path, "Worst Point Heatmap", image_row)
+
+        distribution_path = analysis_excel_path.with_name("bu_weak_point_distribution.png")
+        try:
+            aggregate_analyses = []
+            for rec in bu_records:
+                dst = rec.get("dst")
+                if dst is None or not Path(dst).exists():
+                    continue
+                analysis = bu_weakpoint_view.analyze_weak_points(
+                    Path(dst), BU_GRID_COLS, BU_GRID_ROWS, label=str(rec.get("lot_id", ""))
+                )
+                if analysis.valid_cell_count:
+                    aggregate_analyses.append(analysis)
+            if aggregate_analyses:
+                bu_weakpoint_view.render_aggregate_map(aggregate_analyses, distribution_path)
+                image_row = place_image(
+                    distribution_path, "Weak Point 위치 분포", image_row, max_width=900
+                )
+        except (OSError, ValueError, ImportError) as exc:
+            print(f"  weak point 분포도 생성 실패: {exc}")
     for col, width in {
         "A": 24,
         "B": 24,
@@ -1701,18 +1763,19 @@ def write_bu_analysis_excel(
         "H": 14,
         "I": 14,
         "J": 14,
-        "K": 24,
+        "K": 14,
         "L": 16,
-        "M": 16,
-        "T": 16,
-        "U": 16,
-        "AB": 16,
-        "AC": 10,
+        "M": 12,
+        "N": 12,
+        "O": 24,
+        "P": 12,
     }.items():
         summary_ws.column_dimensions[col].width = width
 
-    for col in ("A", "D", "L"):
+    for col in ("A", "D", "L", "O"):
         summary_ws[f"{col}1"].font = Font(bold=True)
+    for row_idx in range(2, summary_ws.max_row + 1):
+        summary_ws.cell(row=row_idx, column=14).number_format = "0.0%"
     detail_ws.freeze_panes = "G9"
     for row_idx in range(1, detail_start_row):
         detail_ws.row_dimensions[row_idx].height = DETAIL_ROW_HEIGHT
