@@ -31,16 +31,25 @@ python main.py
 | 휠 스크롤 | 박스 위에서 | 크기(글자) 조절 |
 
 ## exe 빌드 (PyInstaller)
-```bash
-pip install pyinstaller
-pyinstaller --onefile --windowed --icon=assets/app.ico ^
-    --hidden-import=scipy.special.cython_special ^
-    --hidden-import=scipy._lib.messagestream main.py
-```
-결과물: `dist/main.exe`
 
-> `theme.py` / `stats_core.py` / `widgets.py` 는 `main.py` 와 같은 폴더의 일반 모듈이라
-> PyInstaller가 자동으로 수집합니다. 반드시 `CpkAnalyzer/` 폴더 안에서 빌드하세요.
+반드시 `CpkAnalyzer/` 폴더 안에서, 의존 패키지를 설치한 **같은 파이썬 환경**으로 빌드합니다. PyInstaller는 빌드 환경에 설치된 패키지만 수집하므로 `requirements.txt`를 건너뛰면 scipy가 조용히 빠진 채 exe가 만들어지고, 실행할 때 `ModuleNotFoundError: No module named 'scipy'`가 납니다.
+
+```bash
+pip install -r requirements.txt
+pip install pyinstaller
+pyinstaller --clean --noconfirm CpkAnalyzer.spec
+```
+
+결과물: `dist/CpkAnalyzer.exe`
+
+빌드 설정은 `CpkAnalyzer.spec`에 있습니다. scipy·numpy·matplotlib·pandas·openpyxl을 `collect_all`로 수집하므로 `--hidden-import`를 따로 넘길 필요가 없습니다.
+
+> 이전 README는 `--hidden-import`를 CMD 줄바꿈 문자(`^`)로 이어 붙였는데, PowerShell에서는 `^`가 줄바꿈으로 동작하지 않아 첫 줄만 실행되고 옵션이 통째로 누락됐습니다. spec 파일을 쓰면 셸 종류와 무관하게 같은 결과가 나옵니다.
+
+### 배포 시 참고
+- onefile이라 `dist/CpkAnalyzer.exe` 한 파일만 압축해 전달하면 됩니다.
+- UPX 압축은 사내 백신 오탐과 Qt/scipy DLL 파손 사례가 있어 spec에서 꺼두었습니다.
+- onefile은 실행할 때마다 임시 폴더에 압축을 풀어 첫 구동이 수 초에서 수십 초 걸립니다. 체감이 나쁘면 onedir 방식이 훨씬 빠릅니다.
 
 ## 수식
 ```
