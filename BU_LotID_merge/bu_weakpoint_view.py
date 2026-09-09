@@ -42,15 +42,17 @@ BACKGROUND_VALUE_MAX = 0.16
 # 자홍(300도 초과)은 빨강을 넘어선 오버레인지이므로 최대 심각도로 취급한다.
 HUE_OVERRANGE_MIN_DEG = 300.0
 
-# 심각도가 이 값 이상인 셀을 weak point 로 본다. 0.75 = 노랑부터.
-WEAK_SEVERITY_MIN = 0.75
+# 심각도가 이 값 이상인 셀을 weak point 로 본다.
+# 노랑·주황·빨강 영역 전체가 대상이다. 색상환에서 노랑과 연두가 갈리는 지점이
+# hue 70도이고 이를 심각도로 환산하면 0.708 이라, 그 값을 경계로 쓴다.
+WEAK_SEVERITY_MIN = 0.708
 
 # 셀이 유효하려면 이 비율 이상이 히트맵 픽셀이어야 한다.
 CELL_CONTENT_RATIO_MIN = 0.70
 
-# 9분할 영역 이름 (사용자가 "주로 어디에 있는지" 를 말로 확인할 때 쓴다)
-ZONE_ROW_LABELS = ("상", "중", "하")
+# 9분할 영역 이름. 좌우를 먼저 부르는 현장 표기(좌상·중상·우상)를 따른다.
 ZONE_COL_LABELS = ("좌", "중", "우")
+ZONE_ROW_LABELS = ("상", "중", "하")
 
 # 한글 라벨이 두부(□)로 깨지지 않도록 우선순위대로 탐색한다.
 # Windows 실사용 환경은 Malgun Gothic, 리눅스 빌드 환경은 Noto/Nanum 이 잡힌다.
@@ -210,7 +212,7 @@ class WeakPointAnalysis:
                     c for c in weak
                     if r0 < c.row <= r1 and c0 < c.col <= c1
                 ]
-                name = f"{ZONE_ROW_LABELS[zr]}{ZONE_COL_LABELS[zc]}"
+                name = f"{ZONE_COL_LABELS[zc]}{ZONE_ROW_LABELS[zr]}"
                 zones[name] = {
                     "weak_count": len(hit),
                     "cell_count": total,
@@ -386,12 +388,12 @@ def render_distribution_map(
     zone_grid = np.zeros((3, 3))
     for zr in range(3):
         for zc in range(3):
-            name = f"{ZONE_ROW_LABELS[zr]}{ZONE_COL_LABELS[zc]}"
+            name = f"{ZONE_COL_LABELS[zc]}{ZONE_ROW_LABELS[zr]}"
             zone_grid[zr][zc] = zones[name]["ratio"]
     ax.imshow(zone_grid, cmap=cmap, vmin=0.0, vmax=max(0.001, zone_grid.max()))
     for zr in range(3):
         for zc in range(3):
-            name = f"{ZONE_ROW_LABELS[zr]}{ZONE_COL_LABELS[zc]}"
+            name = f"{ZONE_COL_LABELS[zc]}{ZONE_ROW_LABELS[zr]}"
             info = zones[name]
             ax.text(
                 zc, zr,
