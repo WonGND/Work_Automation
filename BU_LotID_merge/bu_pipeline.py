@@ -402,34 +402,9 @@ def write_merge_report(rows: list[dict], output_root: Path) -> Path:
         writer.writerows(rows)
     return report_path
 
-def write_data_only_excel(latest_measurements: dict[str, dict], output_path: Path) -> None:
-    wb = Workbook()
-    total_ws = wb.active
-    if total_ws is None:
-        raise RuntimeError("데이터 전용 엑셀 시트를 만들지 못했습니다.")
-    total_ws.title = "Total"
-    total_ws.append(["LotID", "ModelName", "Judge", "Black_Uniformity", "White_Uniformity", "Time"])
-    bu_ws = wb.create_sheet("BU_Data")
-    bu_ws.append(["LotID", "ModelName", "Judge", "Black_Uniformity", "Time"])
-    wu_ws = wb.create_sheet("WU_Data")
-    wu_ws.append(["LotID", "ModelName", "Judge", "White_Uniformity", "Time"])
-    for lot_id in sorted(latest_measurements):
-        measurement = latest_measurements[lot_id]
-        common = [lot_id, measurement.get("model_name", ""), measurement.get("judge", "")]
-        black = excel_measurement_value(measurement.get("black_uniformity", ""))
-        white = excel_measurement_value(measurement.get("white_uniformity", ""))
-        time_value = measurement.get("time_str", "")
-        total_ws.append([*common, black, white, time_value])
-        if black != "":
-            bu_ws.append([*common, black, time_value])
-        if white != "":
-            wu_ws.append([*common, white, time_value])
-    wb.save(output_path)
-
 def run_pipeline(integrated_root: Path, data_root: Path, threshold: int, padding: int, cancel_check=None) -> dict:
     cropped_root = integrated_root.parent / f"{integrated_root.name}_LotID_latest_v1_cropped_v1"
     excel_path = cropped_root / "crop_report.xlsx"
-    data_excel_path = cropped_root / "BU_WU_Data_정리본_NoImage.xlsx"
 
     ensure_not_cancelled(cancel_check)
     latest_folders, merge_rows = collect_latest_lotid_folders(integrated_root, cancel_check)
@@ -451,7 +426,6 @@ def run_pipeline(integrated_root: Path, data_root: Path, threshold: int, padding
         measurement_rows,
         cancel_check=cancel_check,
     )
-    write_data_only_excel(latest_m, data_excel_path)
 
     success_count = sum(1 for record in crop_records if record["status"] == "OK")
     error_count = sum(1 for record in crop_records if record["status"].startswith("ERROR"))
@@ -462,7 +436,6 @@ def run_pipeline(integrated_root: Path, data_root: Path, threshold: int, padding
         "merged_root": merged_root,
         "cropped_root": cropped_root,
         "excel_path": excel_path,
-        "data_only_excel_path": data_excel_path,
         "merge_report_path": merge_report_path,
         "latest_lotids": len(latest_folders),
         "crop_records": len(crop_records),

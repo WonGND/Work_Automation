@@ -133,7 +133,6 @@ class BUOrganizeApp:
         self.padding_var = tk.StringVar(value=str(self.settings.get("default_padding", 20)))
         self.status_var = tk.StringVar(value="대기 중")
         self.main_result_var = tk.StringVar(value="아직 생성되지 않음")
-        self.bu_result_var = tk.StringVar(value="별도 생성 없음")
         self.log_path_var = tk.StringVar(value=str(LOG_PATH))
         self.session_note_var = tk.StringVar(value="실행 대기")
         self.current_view = "main"
@@ -367,9 +366,7 @@ class BUOrganizeApp:
         file_grid.columnconfigure(0, weight=1)
         file_grid.columnconfigure(1, weight=1)
         ttk.Label(file_grid, text="메인 엑셀 파일", style="CardCaption.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
-        ttk.Label(file_grid, text="추가 엑셀 파일", style="CardCaption.TLabel").grid(row=0, column=1, sticky="w")
         ttk.Label(file_grid, textvariable=self.main_result_var, style="FileValue.TLabel").grid(row=1, column=0, sticky="w", pady=(5, 8), padx=(0, 10))
-        ttk.Label(file_grid, textvariable=self.bu_result_var, style="FileValue.TLabel").grid(row=1, column=1, sticky="w", pady=(5, 8))
         result_actions = ttk.Frame(result_card)
         result_actions.grid(row=1, column=0, sticky="ew")
         for idx in range(2):
@@ -705,7 +702,6 @@ class BUOrganizeApp:
         self.status_var.set("실행 중")
         self.session_note_var.set("작업이 진행 중입니다")
         self.main_result_var.set("작업이 진행 중입니다.")
-        self.bu_result_var.set("데이터 전용 엑셀을 생성 중입니다.")
         self._refresh_status_display()
         self.run_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
@@ -766,8 +762,6 @@ class BUOrganizeApp:
         self.status_var.set("완료")
         self.session_note_var.set("DATA 정리 완료")
         self.main_result_var.set(Path(result["excel_path"]).name if result.get("excel_path") else "생성됨")
-        data_only_path = result.get("data_only_excel_path")
-        self.bu_result_var.set(Path(data_only_path).name if data_only_path else "생성되지 않음")
         self._refresh_status_display()
         self._append_log(
             f"\n완료: {result.get('excel_path', '')}\n"
@@ -794,7 +788,6 @@ class BUOrganizeApp:
         self.status_var.set("중지됨")
         self.session_note_var.set("사용자 요청으로 중지")
         self.main_result_var.set("사용자 요청으로 작업이 중지되었습니다.")
-        self.bu_result_var.set("별도 생성 없음")
         self._refresh_status_display()
         self._append_log(f"\n중지: {message}\n")
         messagebox.showinfo("중지됨", message)
@@ -806,7 +799,6 @@ class BUOrganizeApp:
         self.status_var.set("오류 발생")
         self.session_note_var.set("실행 중 오류 발생")
         self.main_result_var.set("오류로 인해 결과 파일이 생성되지 않았습니다.")
-        self.bu_result_var.set("별도 생성 없음")
         self._refresh_status_display()
         self._append_log(f"\n오류: {error_message}\n")
         messagebox.showerror("실행 오류", error_message)
@@ -839,10 +831,6 @@ class BUOrganizeApp:
     def _open_main_excel(self) -> None:
         if self.latest_result and self.latest_result.get("excel_path"):
             self._open_result(self.latest_result["excel_path"])
-
-    def _open_bu_excel(self) -> None:
-        if self.latest_result and self.latest_result.get("data_only_excel_path"):
-            self._open_result(self.latest_result["data_only_excel_path"])
 
     def _open_result_folder(self) -> None:
         if self.latest_result and self.latest_result.get("excel_path"):
