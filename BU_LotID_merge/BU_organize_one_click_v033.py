@@ -1,4 +1,4 @@
-﻿import csv
+import csv
 import io
 import os
 import re
@@ -17,6 +17,8 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.utils import get_column_letter
 from PIL import Image, ImageDraw
+
+import bu_weakpoint_view
 
 # 처리 대상 이미지 확장자
 ALLOWED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
@@ -936,12 +938,18 @@ def compute_luminance(rgb) -> float:
 
 
 def compute_red_white_score(rgb) -> float:
-    r, g, b = rgb[:3]
-    brightness = compute_luminance(rgb) / 255.0
-    redness = max(0.0, r - max(g, b)) / 255.0
-    whiteness = (min(r, g, b) / 255.0) * brightness
-    green_penalty = max(0.0, g - r) / 255.0
-    return (redness * 2.2) + (whiteness * 1.4) + (brightness * 0.2) - (green_penalty * 1.0)
+    """계측기 컬러맵 상의 위치를 그대로 심각도(0 양호 ~ 1 불량)로 쓴다.
+
+    이전 구현은 휘도와 붉은 정도를 가중합했는데 컬러맵 순서와 어긋났다.
+    실측하면 파랑(가장 양호) 0.014 > 초록(중간) -0.857 로 역전되고,
+    계측기가 얹은 흰색 글자가 1.600 으로 주황보다 높게 잡혀 오검출됐다.
+    색상환 각도로 환산하면 파랑 0 → 청록 .25 → 초록 .5 → 노랑 .75 → 빨강 1 로
+    단조증가하며, 무채색(흰 글자·회색 UI)과 배경은 후보에서 빠진다.
+    """
+    severity = bu_weakpoint_view.severity_from_rgb(rgb)
+    if severity is None:
+        return float("-inf")
+    return severity
 
 
 def build_safe_sheet_name(base_name: str, used_names: set[str]) -> str:
@@ -1321,6 +1329,7 @@ def build_summary_worst_heatmap(
 
     df = pd.DataFrame(records)
     plt.style.use("dark_background")
+    bu_weakpoint_view.apply_korean_font()
     fig, ax = plt.subplots(figsize=(14, 8), dpi=150)
     ax.set_facecolor("#000000")
     fig.patch.set_facecolor("#000000")
@@ -1336,7 +1345,7 @@ def build_summary_worst_heatmap(
     count_max = counts.max() if len(counts) else 1.0
     count_range = max(1e-6, count_max - count_min)
     norm_counts = (counts - count_min) / count_range
-    cmap = plt.cm.get_cmap("magma")
+    cmap = matplotlib.colormaps["magma"]
     colors = cmap(0.35 + (norm_counts * 0.65))
 
     # 바깥 glow
@@ -1445,7 +1454,7 @@ def write_bu_analysis_excel(
     detail_ws["A6"] = "Grid Data"
     detail_ws["B6"] = "최적화된 제품영역 + 5px 내부 축소 영역"
     detail_ws["A7"] = "Worst Point 기준"
-    detail_ws["B7"] = "빨강/흰색 성분 우선 + 제품 content 비율 기준"
+    detail_ws["B7"] = "계측기 컬러맵 색상환 심각도(파랑0→빨강1) + 제품 content 비율 기준"
 
     bu_records = [
         rec for rec in records
@@ -1640,7 +1649,7 @@ def write_bu_analysis_excel(
     summary_ws["L6"] = "Grid Data 기준"
     summary_ws["M6"] = "최적화 제품영역 + 5px 내부 축소"
     summary_ws["L7"] = "Worst Point 기준"
-    summary_ws["M7"] = "빨강/흰색 성분 우선 + 제품 content 비율 기준"
+    summary_ws["M7"] = "계측기 컬러맵 색상환 심각도(파랑0→빨강1) + 제품 content 비율 기준"
     summary_ws["AB2"] = "Worst Point Frequency"
     summary_ws["AB3"] = "Coord"
     summary_ws["AC3"] = "Count"
@@ -1690,6 +1699,31 @@ def write_bu_analysis_excel(
             heatmap_img.width = int(heatmap_img.width * ratio)
             heatmap_img.height = int(heatmap_img.height * ratio)
         summary_ws.add_image(heatmap_img, "T2")
+
+        distribution_path = analysis_excel_path.with_name("bu_weak_point_distribution.png")
+        try:
+            aggregate_analyses = []
+            for rec in bu_records:
+                dst = rec.get("dst")
+                if dst is None or not Path(dst).exists():
+                    continue
+                analysis = bu_weakpoint_view.analyze_weak_points(
+                    Path(dst), BU_GRID_COLS, BU_GRID_ROWS, label=str(rec.get("lot_id", ""))
+                )
+                if analysis.valid_cell_count:
+                    aggregate_analyses.append(analysis)
+            if aggregate_analyses:
+                bu_weakpoint_view.render_aggregate_map(aggregate_analyses, distribution_path)
+                summary_ws["AE1"] = "Weak Point 위치 분포"
+                summary_ws["AE1"].font = Font(size=13, bold=True, color="111827")
+                distribution_img = XLImage(str(distribution_path))
+                if distribution_img.width > 720:
+                    ratio = 720 / distribution_img.width
+                    distribution_img.width = int(distribution_img.width * ratio)
+                    distribution_img.height = int(distribution_img.height * ratio)
+                summary_ws.add_image(distribution_img, "AE2")
+        except (OSError, ValueError, ImportError) as exc:
+            print(f"  weak point 분포도 생성 실패: {exc}")
     for col, width in {
         "A": 24,
         "B": 24,
