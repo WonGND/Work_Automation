@@ -1,6 +1,7 @@
 """차트 캔버스와 사용자 상호작용 위젯."""
 
 import platform
+from pathlib import Path
 
 import matplotlib
 
@@ -13,17 +14,42 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from theme import BORDER, PRIMARY, TEXT_MAIN
 
 
-def setup_korean_font():
-    """운영체제에 맞는 한국어 폰트를 설정한다."""
-    system = platform.system()
-    if system == "Windows":
-        font = "Malgun Gothic"
-    elif system == "Darwin":
-        font = "AppleGothic"
-    else:
-        font = "NanumGothic"
-    matplotlib.rcParams["font.family"] = font
+# 운영체제별 1순위 폰트를 먼저 보고, 없으면 뒤 후보로 넘어간다.
+# 기존 구현은 설치 여부를 확인하지 않고 이름만 넣어서, 해당 폰트가 없는 PC 에서는
+# 차트 한글이 통째로 두부(네모)로 깨졌다.
+_KOREAN_FONT_CANDIDATES = {
+    "Windows": ("Malgun Gothic", "NanumGothic", "Noto Sans CJK KR", "Gulim"),
+    "Darwin": ("AppleGothic", "Apple SD Gothic Neo", "NanumGothic", "Noto Sans CJK KR"),
+}
+_KOREAN_FONT_FALLBACK = ("NanumGothic", "Noto Sans CJK KR", "Noto Sans KR", "Malgun Gothic")
+
+
+def setup_korean_font() -> str | None:
+    """실제 설치된 한국어 폰트를 골라 적용하고 그 이름을 돌려준다."""
+    from matplotlib import font_manager
+
     matplotlib.rcParams["axes.unicode_minus"] = False
+    candidates = _KOREAN_FONT_CANDIDATES.get(platform.system(), _KOREAN_FONT_FALLBACK)
+
+    available = {f.name for f in font_manager.fontManager.ttflist}
+    for name in candidates:
+        if name in available:
+            matplotlib.rcParams["font.family"] = name
+            return name
+
+    for path in font_manager.findSystemFonts(fontext="ttf"):
+        lowered = Path(path).name.lower()
+        if not any(key in lowered for key in ("malgun", "nanum", "notosanscjk", "gulim")):
+            continue
+        try:
+            font_manager.fontManager.addfont(path)
+            resolved = font_manager.FontProperties(fname=path).get_name()
+        except (RuntimeError, OSError, ValueError):
+            continue
+        matplotlib.rcParams["font.family"] = resolved
+        return resolved
+
+    return None
 
 
 setup_korean_font()

@@ -36,6 +36,10 @@ for resource in ("assets", "sample_data"):
         datas.append((str(resource_dir), resource))
 
 # PyQt5 는 Qt5 전체를 끌고 오므로 쓰지 않는 하위 스택을 덜어낸다.
+# scipy 하위 모듈은 절대 제외하지 않는다. scipy.stats._stats_py 가
+# scipy.spatial.distance 를 임포트하는 등 내부 의존이 얽혀 있어, 크기를 줄이려고
+# scipy.spatial 을 빼면 빌드는 통과하지만 실행 시점에
+# ModuleNotFoundError: No module named 'scipy.spatial._ckdtree' 로 죽는다.
 excludes = [
     "PyQt5.QtWebEngineCore",
     "PyQt5.QtWebEngineWidgets",
@@ -45,8 +49,6 @@ excludes = [
     "PyQt5.QtBluetooth",
     "PyQt5.QtMultimedia",
     "tkinter",
-    "scipy.io.matlab",
-    "scipy.spatial",
     "IPython",
     "jupyter",
     "notebook",
