@@ -2,6 +2,7 @@ import io
 import json
 import os
 import queue
+import re
 import sys
 import threading
 from contextlib import redirect_stderr, redirect_stdout
@@ -131,8 +132,13 @@ class BUOrganizeApp:
         self.data_root_var = tk.StringVar(value=self.settings.get("data_root", ""))
         self.threshold_var = tk.StringVar(value=str(self.settings.get("default_threshold", 12)))
         self.padding_var = tk.StringVar(value=str(self.settings.get("default_padding", 20)))
+        self.analyze_bu_var = tk.BooleanVar(value=bool(self.settings.get("analyze_bu_images", False)))
         self.status_var = tk.StringVar(value="대기 중")
         self.main_result_var = tk.StringVar(value="아직 생성되지 않음")
+        self.analysis_result_var = tk.StringVar(value="분석 안 함")
+        self.progress_text_var = tk.StringVar(value="대기 중")
+        self._stage_index = 0
+        self._stage_total = 5
         self.log_path_var = tk.StringVar(value=str(LOG_PATH))
         self.session_note_var = tk.StringVar(value="실행 대기")
         self.current_view = "main"
@@ -192,6 +198,7 @@ class BUOrganizeApp:
             "default_padding": 20,
             "image_root": "",
             "data_root": "",
+            "analyze_bu_images": False,
         }
 
     def _load_settings(self) -> dict:
@@ -212,6 +219,7 @@ class BUOrganizeApp:
                 "remember_paths": self.remember_paths_var.get(),
                 "default_threshold": self._safe_int(self.default_threshold_var.get(), 12),
                 "default_padding": self._safe_int(self.default_padding_var.get(), 20),
+                "analyze_bu_images": self.analyze_bu_var.get(),
             }
         )
         if self.remember_paths_var.get():
@@ -334,6 +342,13 @@ class BUOrganizeApp:
         self._add_source_block(source_card, 1, "측정 데이터 상위 폴더", self.data_root_var, self._choose_data_root)
         self._add_spin_block(source_card, 2, "비검정 판정 임계값", "데이터 필터링 강도 설정", self.threshold_var, 1)
         self._add_spin_block(source_card, 3, "크롭 패딩(px)", "이미지 추출 여유 공간", self.padding_var, 1)
+        self._add_option_block(
+            source_card,
+            4,
+            "BU Image 분석",
+            "제품별 색 분포와 9분할 weak point를 분석합니다",
+            self.analyze_bu_var,
+        )
 
         status_card = self._make_card(self.main_view, "현재 상태", 1)
         status_row = ttk.Frame(status_card, style="Card.TFrame")
@@ -357,8 +372,11 @@ class BUOrganizeApp:
         self.stop_button = ttk.Button(status_row, text="■\n중지", style="BigStop.TButton", command=self.stop_run, state="disabled")
         self.stop_button.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
         self.stop_button.configure(takefocus=False)
-        self.progress = ttk.Progressbar(status_card, mode="indeterminate")
+        self.progress = ttk.Progressbar(status_card, mode="determinate", maximum=100)
         self.progress.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        ttk.Label(status_card, textvariable=self.progress_text_var, style="Subtle.TLabel").grid(
+            row=2, column=0, sticky="w", pady=(4, 0)
+        )
 
         result_card = self._make_card(self.main_view, "결과 파일", 2)
         file_grid = ttk.Frame(result_card, style="Card.TFrame")
@@ -367,6 +385,8 @@ class BUOrganizeApp:
         file_grid.columnconfigure(1, weight=1)
         ttk.Label(file_grid, text="메인 엑셀 파일", style="CardCaption.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
         ttk.Label(file_grid, textvariable=self.main_result_var, style="FileValue.TLabel").grid(row=1, column=0, sticky="w", pady=(5, 8), padx=(0, 10))
+        ttk.Label(file_grid, text="BU 분석 엑셀", style="CardCaption.TLabel").grid(row=0, column=1, sticky="w", padx=(10, 0))
+        ttk.Label(file_grid, textvariable=self.analysis_result_var, style="FileValue.TLabel").grid(row=1, column=1, sticky="w", pady=(5, 8), padx=(10, 0))
         result_actions = ttk.Frame(result_card)
         result_actions.grid(row=1, column=0, sticky="ew")
         for idx in range(2):
@@ -496,6 +516,22 @@ class BUOrganizeApp:
         ttk.Entry(spin_wrap, textvariable=variable, width=6, justify="center").grid(row=0, column=1, padx=6)
         ttk.Button(spin_wrap, text="＋", width=2, style="MiniSpin.TButton", command=lambda: self._adjust_number(variable, step)).grid(row=0, column=2)
 
+    def _add_option_block(self, parent, row: int, title: str, desc: str, variable: tk.BooleanVar) -> None:
+        block = ttk.Frame(parent, padding=(0, 10, 0, 0), style="Card.TFrame")
+        block.grid(row=row + 1, column=0, sticky="ew")
+        block.columnconfigure(1, weight=1)
+        ttk.Label(block, text=title, style="CardCaption.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(block, text=desc, style="Subtle.TLabel").grid(row=1, column=0, sticky="w")
+        toggle_wrap = ttk.Frame(block, style="Panel.TFrame", padding=6)
+        toggle_wrap.grid(row=0, column=1, rowspan=2, sticky="e")
+        ttk.Checkbutton(
+            toggle_wrap,
+            text="실행",
+            variable=variable,
+            command=self._on_settings_changed,
+            style="Panel.TCheckbutton",
+        ).grid(row=0, column=0)
+
     def _bind_log_resizer(self, handle, text_widget, minimum_height: int, maximum_height: int) -> None:
         handle.bind("<ButtonPress-1>", lambda e, t=text_widget: self._start_resize(e, t))
         handle.bind("<B1-Motion>", lambda e, t=text_widget, mn=minimum_height, mx=maximum_height: self._perform_resize(e, t, mn, mx))
@@ -594,6 +630,8 @@ class BUOrganizeApp:
         self.style.configure("TEntry", fieldbackground=theme["panel_bg"], foreground=theme["text"], font=self._font(10))
         self.style.configure("TCombobox", fieldbackground=theme["panel_bg"], foreground=theme["text"], font=self._font(10))
         self.style.configure("TCheckbutton", background=theme["card_bg"], foreground=theme["text"], font=self._font(10))
+        self.style.configure("Panel.TCheckbutton", background=theme["panel_bg"], foreground=theme["text"], font=self._font(10, "bold"))
+        self.style.map("Panel.TCheckbutton", background=[("active", theme["panel_bg"])])
         self.style.configure("Horizontal.TProgressbar", troughcolor=theme["muted_btn"], background=theme["accent"], bordercolor=theme["border"], lightcolor=theme["accent"], darkcolor=theme["accent"])
 
         self.header.configure(style="Header.TFrame")
@@ -671,8 +709,35 @@ class BUOrganizeApp:
                 message = self.log_queue.get_nowait()
             except queue.Empty:
                 break
+            self._update_progress_from_log(message)
             self._append_log(message)
         self.root.after(120, self._poll_log_queue)
+
+    def _update_progress_from_log(self, message: str) -> None:
+        """파이프라인이 찍는 단계 머리말과 진행률 줄을 읽어 막대에 반영한다.
+
+        파이프라인은 표준 출력만 쓰고 GUI를 모른다. 그 경계를 유지하려고
+        콜백을 새로 넘기는 대신 이미 흐르고 있는 로그를 해석한다.
+        """
+        stage = re.search(r"\[(\d+)/(\d+)\]\s*(.+)", message)
+        if stage is not None:
+            self._stage_index = int(stage.group(1))
+            self._stage_total = max(int(stage.group(2)), 1)
+            self._set_progress(0.0, stage.group(3).split("(")[0].strip())
+            return
+
+        detail = re.search(r"(\S[^:]*):\s*(\d+)/(\d+)\s*\(\s*([\d.]+)%\)", message)
+        if detail is not None and self._stage_index:
+            done, total = int(detail.group(2)), max(int(detail.group(3)), 1)
+            self._set_progress(done / total, f"{detail.group(1).strip()} {done}/{total}")
+
+    def _set_progress(self, stage_ratio: float, label: str) -> None:
+        completed = max(self._stage_index - 1, 0)
+        overall = (completed + min(max(stage_ratio, 0.0), 1.0)) / self._stage_total * 100
+        self.progress.configure(value=overall)
+        self.progress_text_var.set(
+            f"[{self._stage_index}/{self._stage_total}] {label} · 전체 {overall:.0f}%"
+        )
 
     def start_run(self) -> None:
         if self.worker and self.worker.is_alive():
@@ -705,7 +770,10 @@ class BUOrganizeApp:
         self._refresh_status_display()
         self.run_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
-        self.progress.start(10)
+        self._stage_index = 0
+        self._stage_total = 6 if self.analyze_bu_var.get() else 5
+        self.progress.configure(value=0)
+        self.progress_text_var.set("시작 준비 중... 0%")
         for widget in (self.preview_text, self.log_text):
             if widget is None:
                 continue
@@ -715,12 +783,19 @@ class BUOrganizeApp:
 
         self.worker = threading.Thread(
             target=self._run_worker,
-            args=(image_root, data_root, threshold, padding),
+            args=(image_root, data_root, threshold, padding, self.analyze_bu_var.get()),
             daemon=True,
         )
         self.worker.start()
 
-    def _run_worker(self, image_root: Path, data_root: Path, threshold: int, padding: int) -> None:
+    def _run_worker(
+        self,
+        image_root: Path,
+        data_root: Path,
+        threshold: int,
+        padding: int,
+        analyze_bu_images: bool,
+    ) -> None:
         writer = QueueWriter(self.log_queue, LOG_PATH)
         PipelineCancelled, run_pipeline = get_pipeline()
         try:
@@ -731,6 +806,7 @@ class BUOrganizeApp:
                 print(f"측정 데이터 폴더: {data_root}")
                 print(f"비검정 임계값: {threshold}")
                 print(f"크롭 패딩: {padding}")
+                print(f"BU Image 분석: {'실행' if analyze_bu_images else '건너뜀'}")
                 print(f"로그 파일: {LOG_PATH}")
                 result = run_pipeline(
                     image_root,
@@ -738,6 +814,7 @@ class BUOrganizeApp:
                     threshold,
                     padding,
                     cancel_check=self.cancel_requested.is_set,
+                    analyze_bu_images=analyze_bu_images,
                 )
                 print(f"실행 완료: {result.get('excel_path', 'N/A')}")
                 print("=" * 70)
@@ -756,12 +833,20 @@ class BUOrganizeApp:
 
     def _on_success(self, result: dict) -> None:
         self.latest_result = result
-        self.progress.stop()
+        self.progress.configure(value=100)
+        self.progress_text_var.set("완료 100%")
         self.run_button.configure(state="normal")
         self.stop_button.configure(state="disabled")
         self.status_var.set("완료")
         self.session_note_var.set("DATA 정리 완료")
         self.main_result_var.set(Path(result["excel_path"]).name if result.get("excel_path") else "생성됨")
+        analysis_path = result.get("analysis_excel_path")
+        if analysis_path:
+            self.analysis_result_var.set(
+                f"{Path(analysis_path).name} (weak {result.get('weak_products', 0)}개)"
+            )
+        else:
+            self.analysis_result_var.set("분석 안 함")
         self._refresh_status_display()
         self._append_log(
             f"\n완료: {result.get('excel_path', '')}\n"
@@ -782,7 +867,7 @@ class BUOrganizeApp:
             self._open_path(Path(self.latest_result["excel_path"]).parent)
 
     def _on_cancelled(self, message: str) -> None:
-        self.progress.stop()
+        self.progress_text_var.set("중지됨")
         self.run_button.configure(state="normal")
         self.stop_button.configure(state="disabled")
         self.status_var.set("중지됨")
@@ -793,7 +878,7 @@ class BUOrganizeApp:
         messagebox.showinfo("중지됨", message)
 
     def _on_failure(self, error_message: str) -> None:
-        self.progress.stop()
+        self.progress_text_var.set("오류 발생")
         self.run_button.configure(state="normal")
         self.stop_button.configure(state="disabled")
         self.status_var.set("오류 발생")

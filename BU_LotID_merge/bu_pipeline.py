@@ -18,7 +18,9 @@ from bu_common import (
     iter_csv_dict_rows,
     normalize_lot_id,
     parse_lot_kind,
+    print_file_created,
     print_progress,
+    print_stage,
 )
 
 DATA_FILE_PATTERN = "LMK6DataLog.csv"
@@ -56,6 +58,7 @@ def collect_latest_lotid_folders(
     integrated_root: Path,
     cancel_check=None,
     recursive: bool = True,
+    total_steps: int = 5,
 ) -> tuple[dict[str, Path], list[dict]]:
     """이미지가 직접 든 LotID 폴더를 찾아 이름별 최신 폴더를 고른다.
 
@@ -73,7 +76,7 @@ def collect_latest_lotid_folders(
     ]
     total = len(lotid_folders)
     scope = "전체 하위" if recursive else "직계 하위"
-    print(f"\n[1/5] LotID 폴더 스캔 시작 ({scope}, 대상 폴더: {total}개)")
+    print_stage(1, total_steps, "LotID 폴더 스캔", f"{scope}, 대상 폴더 {total}개")
 
     latest_by_lotid: dict[str, Path] = {}
     latest_times: dict[str, tuple[float, float]] = {}
@@ -105,7 +108,7 @@ def collect_latest_lotid_folders(
         row["selected_latest_final"] = "TRUE" if row["folder_path"] in selected else "FALSE"
     return latest_by_lotid, all_rows
 
-def copy_latest_folders(latest_by_lotid: dict[str, Path], dst_root: Path, cancel_check=None) -> None:
+def copy_latest_folders(latest_by_lotid: dict[str, Path], dst_root: Path, cancel_check=None, total_steps: int = 5) -> None:
     dst_root.mkdir(parents=True, exist_ok=True)
     selected_names = set(latest_by_lotid)
     for stale in dst_root.iterdir():
@@ -117,7 +120,7 @@ def copy_latest_folders(latest_by_lotid: dict[str, Path], dst_root: Path, cancel
 
     items = sorted(latest_by_lotid.items())
     total = len(items)
-    print(f"\n[2/5] 최신 LotID 폴더 병렬 복사 시작 (대상: {total}개)")
+    print_stage(2, total_steps, "최신 LotID 폴더 병렬 복사", f"대상 {total}개")
     lock = threading.Lock()
     copied = 0
 
@@ -138,10 +141,10 @@ def copy_latest_folders(latest_by_lotid: dict[str, Path], dst_root: Path, cancel
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         list(executor.map(copy_one, items))
 
-def collect_latest_measurements(data_root: Path, cancel_check=None) -> tuple[dict[str, dict], list[dict]]:
+def collect_latest_measurements(data_root: Path, cancel_check=None, total_steps: int = 5) -> tuple[dict[str, dict], list[dict]]:
     csv_files = sorted(data_root.rglob(DATA_FILE_PATTERN))
     total = len(csv_files)
-    print(f"\n[3/5] 측정 CSV 스캔 시작 (대상 파일: {total}개)")
+    print_stage(3, total_steps, "측정 CSV 스캔", f"대상 파일 {total}개")
 
     latest_measurements: dict[str, dict] = {}
     all_measurement_rows = []
@@ -227,7 +230,7 @@ def excel_measurement_value(value):
     except ValueError:
         return text
 
-def crop_images(merged_root: Path, cropped_root: Path, threshold: int, padding: int, cancel_check=None) -> list[dict]:
+def crop_images(merged_root: Path, cropped_root: Path, threshold: int, padding: int, cancel_check=None, total_steps: int = 5) -> list[dict]:
     if cropped_root.exists():
         shutil.rmtree(cropped_root)
     cropped_root.mkdir(parents=True, exist_ok=True)
@@ -239,7 +242,7 @@ def crop_images(merged_root: Path, cropped_root: Path, threshold: int, padding: 
     )
     
     total = len(image_files)
-    print(f"\n[4/5] 이미지 크롭 시작 (대상: {total}개, 멀티스레드 활성화)")
+    print_stage(4, total_steps, "이미지 크롭", f"대상 {total}개, 멀티스레드")
 
     records = []
     lock = threading.Lock()
@@ -297,6 +300,8 @@ def write_excel(
     measurement_rows=None,
     image_width_px: int = 240,
     cancel_check=None,
+    total_steps: int = 5,
+    excel_step: int = 5,
 ):
     wb = Workbook()
     ws = wb.active
@@ -304,7 +309,7 @@ def write_excel(
         raise RuntimeError("엑셀 결과 시트를 만들지 못했습니다.")
     ws.title = "결과"
     ws.append(["LotID", "판정", "BU data 수치화", "BU Image", "WU data", "WU Image"])
-    print(f"\n[5/5] 엑셀 작성 시작 (이미지 기록: {len(records)}개)")
+    print_stage(excel_step, total_steps, "메인 엑셀 작성", f"이미지 기록 {len(records)}개")
 
     grouped = {}
     for rec in records:
@@ -390,8 +395,9 @@ def write_excel(
     for column, width in zip("ABCDEFG", [12, 26, 10, 28, 60, 60, 48]):
         detail_ws.column_dimensions[column].width = width
 
-    print("\n메인 엑셀 저장")
+    print("  엑셀 파일 저장 중...")
     wb.save(excel_path)
+    print_file_created(excel_path, "메인 엑셀")
 
 def write_merge_report(rows: list[dict], output_root: Path) -> Path:
     report_path = output_root / "merge_report.csv"
@@ -400,24 +406,168 @@ def write_merge_report(rows: list[dict], output_root: Path) -> Path:
         writer = csv.DictWriter(file, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+    print_file_created(report_path, "병합 리포트")
     return report_path
 
-def run_pipeline(integrated_root: Path, data_root: Path, threshold: int, padding: int, cancel_check=None) -> dict:
+def run_bu_image_analysis(
+    crop_records: list[dict],
+    excel_path: Path,
+    cancel_check=None,
+    step: int = 5,
+    total_steps: int = 6,
+) -> dict:
+    from bu_image_analysis import (
+        COLOR_NAMES,
+        WEAK_SEVERITY_MIN,
+        ZONE_NAMES,
+        aggregate_zone_stats,
+        analyze_bu_image,
+    )
+
+    targets = [
+        record
+        for record in crop_records
+        if record["kind"] == "BU" and record["dst"] and Path(record["dst"]).exists()
+    ]
+    total = len(targets)
+    print_stage(step, total_steps, "BU Image 분석", f"대상 {total}개")
+    if total == 0:
+        print("  분석할 BU 이미지가 없어 건너뜁니다.")
+        return {"analysis_excel_path": None, "analyzed": 0, "weak_products": 0}
+
+    analyses = []
+    for index, record in enumerate(targets, start=1):
+        ensure_not_cancelled(cancel_check)
+        analysis = analyze_bu_image(Path(record["dst"]), record["lot_id"])
+        analyses.append(analysis)
+        if analysis.status != "OK":
+            print(f"  분석 실패: {record['lot_id']} ({analysis.status})")
+        if index == 1 or index % 10 == 0 or index == total:
+            print_progress("  분석 진행", index, total, done=(index == total))
+
+    print("  엑셀 파일 생성 중...")
+    wb = Workbook()
+    summary_ws = wb.active
+    if summary_ws is None:
+        raise RuntimeError("BU 분석 시트를 만들지 못했습니다.")
+    summary_ws.title = "제품별_요약"
+    summary_ws.append(
+        ["LotID", "상태", "평균 심각도", "Weak 비율(%)", "Weak 집중 영역", "집중 영역 비율(%)"]
+        + [f"{name}(%)" for name in COLOR_NAMES]
+    )
+    for analysis in analyses:
+        summary_ws.append(
+            [
+                analysis.lot_id,
+                analysis.status,
+                round(analysis.mean_severity, 5),
+                round(analysis.weak_ratio * 100, 4),
+                analysis.dominant_zone,
+                round(analysis.dominant_zone_ratio * 100, 4),
+            ]
+            + [round(analysis.color_ratios.get(name, 0.0) * 100, 4) for name in COLOR_NAMES]
+        )
+    for column, width in zip("ABCDEFGHIJKL", [40, 10, 14, 14, 16, 18, 12, 12, 12, 12, 12, 12]):
+        summary_ws.column_dimensions[column].width = width
+    summary_ws.freeze_panes = "A2"
+
+    zone_ws = wb.create_sheet("영역별_Weak")
+    zone_ws.append(["LotID"] + list(ZONE_NAMES))
+    for analysis in analyses:
+        zone_ws.append(
+            [analysis.lot_id]
+            + [round(analysis.zone_weak_ratios.get(name, 0.0) * 100, 4) for name in ZONE_NAMES]
+        )
+    zone_ws.column_dimensions["A"].width = 40
+    for column in "BCDEFGHIJ":
+        zone_ws.column_dimensions[column].width = 10
+    zone_ws.freeze_panes = "B2"
+
+    last_zone_row = max(2, zone_ws.max_row)
+    zone_ws.conditional_formatting.add(
+        f"B2:J{last_zone_row}",
+        CellIsRule(
+            operator="greaterThan",
+            formula=["0"],
+            fill=PatternFill("solid", fgColor="FEE2E2"),
+        ),
+    )
+
+    stats = aggregate_zone_stats(analyses)
+    total_ws = wb.create_sheet("영역별_누적")
+    total_ws.append(["영역", "평균 Weak 비율(%)", "최대 Weak 비율(%)", "검출 제품 수", "검출 비율(%)"])
+    for name in ZONE_NAMES:
+        item = stats[name]
+        total_ws.append(
+            [
+                name,
+                round(item["평균 weak 비율"] * 100, 4),
+                round(item["최대 weak 비율"] * 100, 4),
+                item["검출 제품 수"],
+                round(item["검출 비율"] * 100, 2),
+            ]
+        )
+    for column, width in zip("ABCDE", [10, 20, 20, 14, 14]):
+        total_ws.column_dimensions[column].width = width
+
+    criteria_ws = wb.create_sheet("판정_기준")
+    criteria_ws.append(["항목", "값", "설명"])
+    for row in (
+        ["흰색", "1.00", "가장 낮은 데이터. 계측기 글자로 판정되면 제외"],
+        ["노랑", "0.80", "두 번째로 나쁨"],
+        ["주황", "0.60", "세 번째로 나쁨"],
+        ["빨강", "0.40", "네 번째로 나쁨"],
+        ["청록", "0.15", "초록보다 낮음"],
+        ["초록", "0.00", "가장 양호"],
+        ["Weak 기준", f"{WEAK_SEVERITY_MIN:.2f} 이상", "주황 이상을 weak point 로 판정"],
+    ):
+        criteria_ws.append(row)
+    for column, width in zip("ABC", [14, 16, 52]):
+        criteria_ws.column_dimensions[column].width = width
+
+    wb.save(excel_path)
+    print_file_created(excel_path, "BU 분석 엑셀")
+
+    ok_analyses = [item for item in analyses if item.status == "OK"]
+    weak_products = sum(1 for item in ok_analyses if item.dominant_zone != "없음")
+    print(f"  분석 완료 (성공 {len(ok_analyses)}개, weak 검출 {weak_products}개)")
+    return {
+        "analysis_excel_path": excel_path,
+        "analyzed": len(ok_analyses),
+        "weak_products": weak_products,
+    }
+
+def run_pipeline(
+    integrated_root: Path,
+    data_root: Path,
+    threshold: int,
+    padding: int,
+    cancel_check=None,
+    analyze_bu_images: bool = False,
+) -> dict:
     cropped_root = integrated_root.parent / f"{integrated_root.name}_LotID_latest_v1_cropped_v1"
     excel_path = cropped_root / "crop_report.xlsx"
+    analysis_excel_path = cropped_root / "bu_image_analysis.xlsx"
+    total_steps = 6 if analyze_bu_images else 5
 
     ensure_not_cancelled(cancel_check)
-    latest_folders, merge_rows = collect_latest_lotid_folders(integrated_root, cancel_check)
+    latest_folders, merge_rows = collect_latest_lotid_folders(
+        integrated_root, cancel_check, total_steps=total_steps
+    )
     if not latest_folders:
         raise RuntimeError("LotID 폴더를 찾지 못했습니다. 이미지 통합 폴더 구조를 확인하세요.")
 
     merged_root = integrated_root.parent / f"{integrated_root.name}_LotID_latest_v1"
-    copy_latest_folders(latest_folders, merged_root, cancel_check)
+    copy_latest_folders(latest_folders, merged_root, cancel_check, total_steps=total_steps)
     merge_report_path = write_merge_report(merge_rows, merged_root)
-    
-    latest_m, measurement_rows = collect_latest_measurements(data_root, cancel_check)
-    crop_records = crop_images(merged_root, cropped_root, threshold, padding, cancel_check)
-    
+
+    latest_m, measurement_rows = collect_latest_measurements(
+        data_root, cancel_check, total_steps=total_steps
+    )
+    crop_records = crop_images(
+        merged_root, cropped_root, threshold, padding, cancel_check, total_steps=total_steps
+    )
+
     write_excel(
         crop_records,
         excel_path,
@@ -425,12 +575,29 @@ def run_pipeline(integrated_root: Path, data_root: Path, threshold: int, padding
         merge_rows,
         measurement_rows,
         cancel_check=cancel_check,
+        total_steps=total_steps,
+        excel_step=5,
     )
+
+    analysis_result = {"analysis_excel_path": None, "analyzed": 0, "weak_products": 0}
+    if analyze_bu_images:
+        analysis_result = run_bu_image_analysis(
+            crop_records,
+            analysis_excel_path,
+            cancel_check=cancel_check,
+            step=6,
+            total_steps=total_steps,
+        )
 
     success_count = sum(1 for record in crop_records if record["status"] == "OK")
     error_count = sum(1 for record in crop_records if record["status"].startswith("ERROR"))
     print("\n--- 최종 결과 ---")
     print(f"완료! (크롭 성공: {success_count}, 오류: {error_count})")
+    if analyze_bu_images:
+        print(
+            f"BU Image 분석: {analysis_result['analyzed']}개 분석, "
+            f"weak 검출 {analysis_result['weak_products']}개"
+        )
 
     return {
         "merged_root": merged_root,
@@ -441,6 +608,9 @@ def run_pipeline(integrated_root: Path, data_root: Path, threshold: int, padding
         "crop_records": len(crop_records),
         "crop_ok": success_count,
         "crop_error": error_count,
+        "analysis_excel_path": analysis_result["analysis_excel_path"],
+        "analyzed_images": analysis_result["analyzed"],
+        "weak_products": analysis_result["weak_products"],
     }
 
 if __name__ == "__main__":
@@ -449,4 +619,5 @@ if __name__ == "__main__":
     dr = Path(input("2) 측정 데이터 폴더: ").strip())
     th = int(input("3) 임계값 [12]: ") or 12)
     padding = int(input("4) 패딩 [20]: ") or 20)
-    run_pipeline(ir, dr, th, padding)
+    analyze = (input("5) BU Image 분석 실행 (y/N): ").strip().lower() == "y")
+    run_pipeline(ir, dr, th, padding, analyze_bu_images=analyze)

@@ -32,6 +32,26 @@ def print_progress(
     print(f"{label}: {current}/{total} ({percent:5.1f}%)", end=end, flush=True)
 
 
+def print_stage(step: int, total_steps: int, title: str, detail: str = "") -> None:
+    suffix = f" ({detail})" if detail else ""
+    print(f"\n[{step}/{total_steps}] {title}{suffix}")
+
+
+def print_file_created(path, label: str = "") -> None:
+    from pathlib import Path as _Path
+
+    target = _Path(path)
+    size_text = ""
+    try:
+        size_kb = target.stat().st_size / 1024
+        size_text = f", {size_kb:,.0f} KB" if size_kb >= 1 else ", 1 KB 미만"
+    except OSError:
+        pass
+    prefix = f"{label} " if label else ""
+    print(f"  -> {prefix}{target.name} 파일 생성 완료{size_text}")
+
+
+
 def parse_lot_kind(stem: str) -> tuple[str, str]:
     """확장자를 제외한 파일명 전체가 규칙과 일치할 때 LotID와 종류를 반환한다."""
     match = LOT_PATTERN.fullmatch(stem)
