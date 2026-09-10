@@ -8,7 +8,8 @@ from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.formatting.rule import CellIsRule, FormulaRule
-from openpyxl.styles import PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 from PIL import Image
 
 from bu_common import (
@@ -409,6 +410,74 @@ def write_merge_report(rows: list[dict], output_root: Path) -> Path:
     print_file_created(report_path, "병합 리포트")
     return report_path
 
+COLOR_MAP_MAX_PRODUCTS = 200
+
+
+def write_color_map_sheet(wb, analyses) -> None:
+    """제품별 BU 이미지를 격자로 줄여 셀 배경색으로 다시 그린다.
+
+    이미지를 그대로 넣으면 눈으로만 볼 수 있지만, 셀로 그리면 엑셀에서 확대해
+    특정 칸을 짚어보거나 옆에 수치를 붙여 비교할 수 있다. weak 로 잡힌 칸은
+    굵은 테두리로 감싸 색만으로 구분되지 않는 경계를 드러낸다.
+    """
+    from bu_image_analysis import GRID_COLS, GRID_ROWS
+
+    drawable = [item for item in analyses if item.status == "OK" and item.color_grid]
+    if not drawable:
+        return
+
+    sheet = wb.create_sheet("색분포_맵")
+    truncated = drawable[:COLOR_MAP_MAX_PRODUCTS]
+    edge = Side(style="medium", color="111827")
+    weak_border = Border(left=edge, right=edge, top=edge, bottom=edge)
+
+    sheet.cell(row=1, column=1, value="굵은 테두리 = weak point 로 판정된 칸").font = Font(bold=True)
+    anchor = 3
+    for analysis in truncated:
+        title = sheet.cell(row=anchor, column=1)
+        title.value = (
+            f"{analysis.lot_id}  ·  weak {analysis.weak_ratio * 100:.2f}%"
+            f"  ·  집중 영역 {analysis.dominant_zone}"
+        )
+        title.font = Font(bold=True)
+
+        grid_top = anchor + 1
+        for column in range(GRID_COLS):
+            header = sheet.cell(row=grid_top, column=column + 2, value=column + 1)
+            header.font = Font(size=7)
+            header.alignment = Alignment(horizontal="center")
+
+        for row in range(GRID_ROWS):
+            label = sheet.cell(row=grid_top + 1 + row, column=1, value=row + 1)
+            label.font = Font(size=7)
+            label.alignment = Alignment(horizontal="center")
+            sheet.row_dimensions[grid_top + 1 + row].height = 12
+
+            for column in range(GRID_COLS):
+                cell = sheet.cell(row=grid_top + 1 + row, column=column + 2)
+                color = analysis.color_grid[row][column]
+                if color is not None:
+                    cell.fill = PatternFill("solid", fgColor=color)
+                if analysis.weak_grid[row][column]:
+                    cell.border = weak_border
+
+        anchor = grid_top + GRID_ROWS + 3
+
+    sheet.column_dimensions["A"].width = 4
+    for column in range(GRID_COLS):
+        sheet.column_dimensions[get_column_letter(column + 2)].width = 2.4
+
+    if len(drawable) > COLOR_MAP_MAX_PRODUCTS:
+        sheet.cell(
+            row=anchor,
+            column=1,
+            value=(
+                f"제품이 많아 앞 {COLOR_MAP_MAX_PRODUCTS}개만 그렸습니다. "
+                f"(전체 {len(drawable)}개)"
+            ),
+        ).font = Font(bold=True, color="B45309")
+
+
 def run_bu_image_analysis(
     crop_records: list[dict],
     excel_path: Path,
@@ -524,6 +593,8 @@ def run_bu_image_analysis(
         criteria_ws.append(row)
     for column, width in zip("ABC", [14, 16, 52]):
         criteria_ws.column_dimensions[column].width = width
+
+    write_color_map_sheet(wb, analyses)
 
     wb.save(excel_path)
     print_file_created(excel_path, "BU 분석 엑셀")

@@ -93,6 +93,9 @@ ZONE_NAMES = tuple(
 
 COLOR_NAMES = ("흰색", "노랑", "주황", "빨강", "초록", "청록")
 
+GRID_COLS = 48
+GRID_ROWS = 27
+
 
 def _box_sum(mask: np.ndarray, radius: int) -> tuple[np.ndarray, np.ndarray]:
     """정사각 윈도우 안의 True 개수와 윈도우 크기를 적분영상으로 구한다.
@@ -132,18 +135,27 @@ def _dilate(mask: np.ndarray, radius: int) -> np.ndarray:
     return total > 0
 
 
-def _decompose(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """RGB 배열을 색상환 각도, 채도, 명도, 최대채널로 벡터 변환한다."""
+def _decompose(
+    rgb: np.ndarray,
+    with_hue: bool = True,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """RGB 배열을 색상환 각도, 채도, 명도, 최대채널로 벡터 변환한다.
+
+    색상환 각도는 계산 비용이 큰 편이라, 제품 경계만 찾을 때는 건너뛴다.
+    """
     array = rgb.astype(np.float32)
     red, green, blue = array[..., 0], array[..., 1], array[..., 2]
 
     maximum = array.max(axis=-1)
     minimum = array.min(axis=-1)
     delta = maximum - minimum
-    safe_delta = np.where(delta == 0, 1e-9, delta)
 
     with np.errstate(divide="ignore", invalid="ignore"):
         saturation = np.where(maximum > 0, delta / np.maximum(maximum, 1e-9), 0.0)
+        if not with_hue:
+            return np.empty(0), saturation, maximum / 255.0, maximum
+
+        safe_delta = np.where(delta == 0, 1e-9, delta)
         hue = np.where(
             maximum == red,
             ((green - blue) / safe_delta) % 6.0,
@@ -163,7 +175,7 @@ def find_panel_region(rgb: np.ndarray) -> tuple[int, int, int, int]:
     반환값은 (top, bottom, left, right) 이고 bottom/right 는 exclusive 다.
     계측기 테두리와 헤더를 제외하되 제품 영역은 최대한 남긴다.
     """
-    _, saturation, _, maximum = _decompose(rgb)
+    _, saturation, _, maximum = _decompose(rgb, with_hue=False)
     heat = (saturation >= CHROMATIC_SATURATION_MIN) & (maximum >= BACKGROUND_MAX_CHANNEL)
     height, width = heat.shape
 
@@ -208,6 +220,46 @@ def _is_real_white(
     return warm_ratio >= WHITE_NEIGHBOR_WARM_MIN, warm_ratio
 
 
+def _build_grids(
+    panel: np.ndarray,
+    background: np.ndarray,
+    severity: np.ndarray,
+) -> tuple[list[list[str | None]], list[list[bool]]]:
+    """패널을 격자로 나눠 칸별 대표 색과 weak 여부를 낸다.
+
+    엑셀은 픽셀 단위로 칠할 수 없으므로 셀 하나가 격자 한 칸을 맡는다.
+    """
+    height, width = severity.shape
+    x_edges = [round(i * width / GRID_COLS) for i in range(GRID_COLS + 1)]
+    y_edges = [round(i * height / GRID_ROWS) for i in range(GRID_ROWS + 1)]
+
+    colors: list[list[str | None]] = []
+    weak_flags: list[list[bool]] = []
+    for row in range(GRID_ROWS):
+        color_line: list[str | None] = []
+        weak_line: list[bool] = []
+        for col in range(GRID_COLS):
+            top, bottom = y_edges[row], y_edges[row + 1]
+            left, right = x_edges[col], x_edges[col + 1]
+            pixels = panel[top:bottom, left:right]
+            visible = ~background[top:bottom, left:right]
+            if pixels.size == 0 or not visible.any():
+                color_line.append(None)
+                weak_line.append(False)
+                continue
+            red, green, blue = (int(value) for value in pixels[visible].mean(axis=0))
+            color_line.append(f"{red:02X}{green:02X}{blue:02X}")
+
+            block = severity[top:bottom, left:right]
+            valid = ~np.isnan(block)
+            weak_line.append(
+                bool(valid.any() and (block[valid] >= WEAK_SEVERITY_MIN).mean() > 0.0)
+            )
+        colors.append(color_line)
+        weak_flags.append(weak_line)
+    return colors, weak_flags
+
+
 @dataclass
 class BUImageAnalysis:
     """BU 이미지 한 장의 색 분포와 weak point 결과."""
@@ -223,6 +275,8 @@ class BUImageAnalysis:
     white_is_real: bool = False
     white_warm_ratio: float = 0.0
     panel_region: tuple[int, int, int, int] = (0, 0, 0, 0)
+    color_grid: list[list[str | None]] = field(default_factory=list)
+    weak_grid: list[list[bool]] = field(default_factory=list)
     status: str = "OK"
 
     def summary_text(self) -> str:
@@ -322,6 +376,8 @@ def analyze_bu_image(image_path: Path, lot_id: str = "") -> BUImageAnalysis:
     if dominant_ratio <= 0.0:
         dominant_zone = "없음"
 
+    color_grid, weak_grid = _build_grids(panel, background, severity)
+
     return BUImageAnalysis(
         lot_id=label,
         image_path=image_path,
@@ -334,6 +390,8 @@ def analyze_bu_image(image_path: Path, lot_id: str = "") -> BUImageAnalysis:
         white_is_real=white_is_real,
         white_warm_ratio=warm_ratio,
         panel_region=(top, bottom, left, right),
+        color_grid=color_grid,
+        weak_grid=weak_grid,
     )
 
 
