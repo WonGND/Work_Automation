@@ -303,13 +303,18 @@ def write_excel(
     cancel_check=None,
     total_steps: int = 5,
     excel_step: int = 5,
+    analyses=None,
 ):
     wb = Workbook()
     ws = wb.active
     if ws is None:
         raise RuntimeError("엑셀 결과 시트를 만들지 못했습니다.")
     ws.title = "결과"
-    ws.append(["LotID", "판정", "BU data 수치화", "BU Image", "WU data", "WU Image"])
+    analysis_by_lot = {item.lot_id: item for item in (analyses or []) if item.status == "OK"}
+    header = ["LotID", "판정", "BU data 수치화", "BU Image", "WU data", "WU Image"]
+    if analysis_by_lot:
+        header += ["Weak 비율(%)", "Weak 집중 영역"]
+    ws.append(header)
     print_stage(excel_step, total_steps, "메인 엑셀 작성", f"이미지 기록 {len(records)}개")
 
     grouped = {}
@@ -337,6 +342,11 @@ def write_excel(
                     ws.add_image(xl_img, f"{col}{row_idx}")
                     max_h = max(max_h, xl_img.height)
 
+        analysis = analysis_by_lot.get(lot_id)
+        if analysis is not None:
+            ws.cell(row=row_idx, column=7, value=round(analysis.weak_ratio * 100, 4))
+            ws.cell(row=row_idx, column=8, value=analysis.dominant_zone)
+
         ws.row_dimensions[row_idx].height = max(25, int(max_h * 0.75))
         row_idx += 1
 
@@ -352,7 +362,7 @@ def write_excel(
     ws.conditional_formatting.add(f"E2:E{last_row}", CellIsRule(operator="lessThan", formula=[str(WU_SPEC_MIN)], fill=yellow_fill))
 
     # 컬럼 너비
-    for col, width in zip("ABCDEF", [26, 12, 14, 36, 14, 36]):
+    for col, width in zip("ABCDEFGH", [26, 12, 14, 36, 14, 36, 14, 16]):
         ws.column_dimensions[col].width = width
 
     detail_ws = wb.create_sheet("처리_상세")
@@ -395,6 +405,8 @@ def write_excel(
         )
     for column, width in zip("ABCDEFG", [12, 26, 10, 28, 60, 60, 48]):
         detail_ws.column_dimensions[column].width = width
+
+    write_analysis_sheets(wb, analyses or [])
 
     print("  엑셀 파일 저장 중...")
     wb.save(excel_path)
@@ -478,20 +490,14 @@ def write_color_map_sheet(wb, analyses) -> None:
         ).font = Font(bold=True, color="B45309")
 
 
-def run_bu_image_analysis(
+def analyze_bu_records(
     crop_records: list[dict],
-    excel_path: Path,
     cancel_check=None,
     step: int = 5,
     total_steps: int = 6,
-) -> dict:
-    from bu_image_analysis import (
-        COLOR_NAMES,
-        WEAK_SEVERITY_MIN,
-        ZONE_NAMES,
-        aggregate_zone_stats,
-        analyze_bu_image,
-    )
+) -> list:
+    """크롭 결과에서 BU 이미지를 골라 색 분포와 weak point 를 계산한다."""
+    from bu_image_analysis import analyze_bu_image
 
     targets = [
         record
@@ -502,7 +508,7 @@ def run_bu_image_analysis(
     print_stage(step, total_steps, "BU Image 분석", f"대상 {total}개")
     if total == 0:
         print("  분석할 BU 이미지가 없어 건너뜁니다.")
-        return {"analysis_excel_path": None, "analyzed": 0, "weak_products": 0}
+        return []
 
     analyses = []
     for index, record in enumerate(targets, start=1):
@@ -514,12 +520,31 @@ def run_bu_image_analysis(
         if index == 1 or index % 10 == 0 or index == total:
             print_progress("  분석 진행", index, total, done=(index == total))
 
-    print("  엑셀 파일 생성 중...")
-    wb = Workbook()
-    summary_ws = wb.active
-    if summary_ws is None:
-        raise RuntimeError("BU 분석 시트를 만들지 못했습니다.")
-    summary_ws.title = "제품별_요약"
+    ok_count = sum(1 for item in analyses if item.status == "OK")
+    weak_count = sum(
+        1 for item in analyses if item.status == "OK" and item.dominant_zone != "없음"
+    )
+    print(f"  분석 완료 (성공 {ok_count}개, weak 검출 {weak_count}개)")
+    return analyses
+
+
+def write_analysis_sheets(wb, analyses: list) -> None:
+    """분석 결과 시트를 이미 열려 있는 통합 워크북에 붙인다.
+
+    분석이 전부 실패했다면 통계 시트는 빈 껍데기가 되므로, 실패 사유만 남는
+    요약 시트 한 장으로 끝낸다.
+    """
+    from bu_image_analysis import (
+        COLOR_NAMES,
+        WEAK_SEVERITY_MIN,
+        ZONE_NAMES,
+        aggregate_zone_stats,
+    )
+
+    if not analyses:
+        return
+
+    summary_ws = wb.create_sheet("제품별_요약")
     summary_ws.append(
         ["LotID", "상태", "평균 심각도", "Weak 비율(%)", "Weak 집중 영역", "집중 영역 비율(%)"]
         + [f"{name}(%)" for name in COLOR_NAMES]
@@ -539,6 +564,9 @@ def run_bu_image_analysis(
     for column, width in zip("ABCDEFGHIJKL", [40, 10, 14, 14, 16, 18, 12, 12, 12, 12, 12, 12]):
         summary_ws.column_dimensions[column].width = width
     summary_ws.freeze_panes = "A2"
+
+    if not any(item.status == "OK" for item in analyses):
+        return
 
     zone_ws = wb.create_sheet("영역별_Weak")
     zone_ws.append(["LotID"] + list(ZONE_NAMES))
@@ -596,18 +624,6 @@ def run_bu_image_analysis(
 
     write_color_map_sheet(wb, analyses)
 
-    wb.save(excel_path)
-    print_file_created(excel_path, "BU 분석 엑셀")
-
-    ok_analyses = [item for item in analyses if item.status == "OK"]
-    weak_products = sum(1 for item in ok_analyses if item.dominant_zone != "없음")
-    print(f"  분석 완료 (성공 {len(ok_analyses)}개, weak 검출 {weak_products}개)")
-    return {
-        "analysis_excel_path": excel_path,
-        "analyzed": len(ok_analyses),
-        "weak_products": weak_products,
-    }
-
 def run_pipeline(
     integrated_root: Path,
     data_root: Path,
@@ -618,7 +634,6 @@ def run_pipeline(
 ) -> dict:
     cropped_root = integrated_root.parent / f"{integrated_root.name}_LotID_latest_v1_cropped_v1"
     excel_path = cropped_root / "crop_report.xlsx"
-    analysis_excel_path = cropped_root / "bu_image_analysis.xlsx"
     total_steps = 6 if analyze_bu_images else 5
 
     ensure_not_cancelled(cancel_check)
@@ -639,6 +654,15 @@ def run_pipeline(
         merged_root, cropped_root, threshold, padding, cancel_check, total_steps=total_steps
     )
 
+    analyses = []
+    if analyze_bu_images:
+        analyses = analyze_bu_records(
+            crop_records,
+            cancel_check=cancel_check,
+            step=5,
+            total_steps=total_steps,
+        )
+
     write_excel(
         crop_records,
         excel_path,
@@ -647,28 +671,19 @@ def run_pipeline(
         measurement_rows,
         cancel_check=cancel_check,
         total_steps=total_steps,
-        excel_step=5,
+        excel_step=total_steps,
+        analyses=analyses,
     )
 
-    analysis_result = {"analysis_excel_path": None, "analyzed": 0, "weak_products": 0}
-    if analyze_bu_images:
-        analysis_result = run_bu_image_analysis(
-            crop_records,
-            analysis_excel_path,
-            cancel_check=cancel_check,
-            step=6,
-            total_steps=total_steps,
-        )
+    ok_analyses = [item for item in analyses if item.status == "OK"]
+    weak_products = sum(1 for item in ok_analyses if item.dominant_zone != "없음")
 
     success_count = sum(1 for record in crop_records if record["status"] == "OK")
     error_count = sum(1 for record in crop_records if record["status"].startswith("ERROR"))
     print("\n--- 최종 결과 ---")
     print(f"완료! (크롭 성공: {success_count}, 오류: {error_count})")
     if analyze_bu_images:
-        print(
-            f"BU Image 분석: {analysis_result['analyzed']}개 분석, "
-            f"weak 검출 {analysis_result['weak_products']}개"
-        )
+        print(f"BU Image 분석: {len(ok_analyses)}개 분석, weak 검출 {weak_products}개")
 
     return {
         "merged_root": merged_root,
@@ -679,9 +694,9 @@ def run_pipeline(
         "crop_records": len(crop_records),
         "crop_ok": success_count,
         "crop_error": error_count,
-        "analysis_excel_path": analysis_result["analysis_excel_path"],
-        "analyzed_images": analysis_result["analyzed"],
-        "weak_products": analysis_result["weak_products"],
+        "analysis_excel_path": excel_path if analyze_bu_images else None,
+        "analyzed_images": len(ok_analyses),
+        "weak_products": weak_products,
     }
 
 if __name__ == "__main__":

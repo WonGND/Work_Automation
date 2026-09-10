@@ -96,6 +96,11 @@ COLOR_NAMES = ("흰색", "노랑", "주황", "빨강", "초록", "청록")
 GRID_COLS = 48
 GRID_ROWS = 27
 
+# 이 폭 이상이면 절반으로 줄여 분석한다. 계측기 원본은 4000px 급이라 그대로 두면
+# 픽셀 연산이 네 배 비싸다. 실측에서 1/2 축소는 weak 비율과 집중 영역, 흰색 판정이
+# 모두 같게 나왔다. 1/3 부터는 침식이 글자 획을 과하게 지워 흰색 판정이 뒤집힌다.
+ANALYSIS_DOWNSCALE_MIN_WIDTH = 1600
+
 
 def _box_sum(mask: np.ndarray, radius: int) -> tuple[np.ndarray, np.ndarray]:
     """정사각 윈도우 안의 True 개수와 윈도우 크기를 적분영상으로 구한다.
@@ -296,7 +301,13 @@ def analyze_bu_image(image_path: Path, lot_id: str = "") -> BUImageAnalysis:
     label = lot_id or image_path.stem
     try:
         with Image.open(image_path) as image:
-            rgb = np.asarray(image.convert("RGB"))
+            source = image.convert("RGB")
+            if source.width >= ANALYSIS_DOWNSCALE_MIN_WIDTH:
+                source = source.resize(
+                    (source.width // 2, max(1, source.height // 2)),
+                    Image.BILINEAR,
+                )
+            rgb = np.asarray(source)
     except (OSError, ValueError) as error:
         return BUImageAnalysis(
             lot_id=label,

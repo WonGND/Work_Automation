@@ -385,7 +385,7 @@ class BUOrganizeApp:
         file_grid.columnconfigure(1, weight=1)
         ttk.Label(file_grid, text="메인 엑셀 파일", style="CardCaption.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
         ttk.Label(file_grid, textvariable=self.main_result_var, style="FileValue.TLabel").grid(row=1, column=0, sticky="w", pady=(5, 8), padx=(0, 10))
-        ttk.Label(file_grid, text="BU 분석 엑셀", style="CardCaption.TLabel").grid(row=0, column=1, sticky="w", padx=(10, 0))
+        ttk.Label(file_grid, text="BU Image 분석", style="CardCaption.TLabel").grid(row=0, column=1, sticky="w", padx=(10, 0))
         ttk.Label(file_grid, textvariable=self.analysis_result_var, style="FileValue.TLabel").grid(row=1, column=1, sticky="w", pady=(5, 8), padx=(10, 0))
         result_actions = ttk.Frame(result_card)
         result_actions.grid(row=1, column=0, sticky="ew")
@@ -840,10 +840,10 @@ class BUOrganizeApp:
         self.status_var.set("완료")
         self.session_note_var.set("DATA 정리 완료")
         self.main_result_var.set(Path(result["excel_path"]).name if result.get("excel_path") else "생성됨")
-        analysis_path = result.get("analysis_excel_path")
-        if analysis_path:
+        if result.get("analysis_excel_path"):
             self.analysis_result_var.set(
-                f"{Path(analysis_path).name} (weak {result.get('weak_products', 0)}개)"
+                f"같은 파일에 포함 (분석 {result.get('analyzed_images', 0)}개, "
+                f"weak {result.get('weak_products', 0)}개)"
             )
         else:
             self.analysis_result_var.set("분석 안 함")
