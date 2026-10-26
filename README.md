@@ -6,10 +6,10 @@ pcbsim reads a board description (a YAML config now, KiCad `.kicad_pcb` later), 
 
 | solver      | physics                                                         | status   |
 | ----------- | --------------------------------------------------------------- | -------- |
-| `dc_ir`     | multi-layer PDN IR drop, via resistance, VRM / load ports       | stage 2  |
-| `thermal`   | steady-state and transient 2.5D conduction, convection, radiation | stage 3  |
+| `dc_ir`     | multi-layer PDN IR drop, via resistance, VRM / load ports       | done     |
+| `thermal`   | steady-state and transient 2.5D conduction, convection, radiation | done     |
 | `coupled`   | electro-thermal iteration with ρ(T) and Joule heating           | stage 4  |
-| `si`        | microstrip, stripline and differential Z0; 2D FEM cross-check   | stage 5  |
+| `si`        | microstrip, stripline and differential Z0; 2D FEM cross-check   | done     |
 | `em_openems`| S-parameters via openEMS (optional)                             | stage 8  |
 
 **ECAD–MCAD registration** (`pcbsim match`): aligns a DXF/DWG/STEP mechanical drawing with the Gerber X2/X3 + Excellon board (RANSAC → Umeyama → outline ICP). It checks holes, outline, cutouts, component placement, and height clearance, and turns heat sinks, chassis contacts, and the case air gap into thermal boundaries for `pcbsim run`. See [`docs/registration.md`](docs/registration.md).
@@ -29,14 +29,22 @@ pip install -e ".[dev]"
 ```bash
 pcbsim check examples/soc_4layer.yaml   # validate the config and print a board summary
 pcbsim solvers                          # list registered solver plugins
-pcbsim run examples/soc_4layer.yaml     # stage 2+
-pcbsim report results/                  # stage 7
+pcbsim run examples/soc_4layer.yaml     # dc_ir + thermal + si → results/ (JSON, NPZ, PNG)
+pcbsim run examples/soc_4layer.yaml --solver si   # one solver only
+
+# impedance calculator, no config needed (lengths in mm, or with units)
+pcbsim z0 microstrip -w 0.36 -H 0.2 -t 35um --er 4.2
+pcbsim z0 stripline  -w 0.15 -H 0.5 -s 0.2 --er 4.0     # -s → differential pair
 
 # ECAD–MCAD match (examples/mech)
 pcbsim match --gerber examples/mech/gerber --mech examples/mech/mech.dxf \
              --map examples/mech/layers.yaml --report out/match.html --json out/match.json
 pcbsim run examples/mech/soc_with_mech.yaml   # add --force to simulate despite an NG match
 ```
+
+`coupled` (stage 4) is listed in the example config but not implemented yet; `pcbsim run` skips it with a note. `pcbsim report` (stage 7) is a placeholder that exits with code 3, so use the files in `results/` for now.
+
+Exit codes: 0 pass, 1 invalid input, 2 usage, 3 not implemented, 4 design violations / NG, 5 run refused because the linked ECAD–MCAD match is NG.
 
 ## Config format
 
@@ -53,7 +61,8 @@ pcbsim/
   registration/  ECAD–MCAD registration, checks, report, thermal boundaries
   materials/  YAML material DB (σ, α, εr, tanδ, k, ρ, cp, ε)
   mesh/       2.5D per-layer grids
-  solvers/    Solver ABC + registry (entry-point group "pcbsim.solvers")
+  si/         transmission lines: closed forms, 2D FEM cross-section, stack-up mapping
+  solvers/    Solver ABC + registry (entry-point group "pcbsim.solvers"): dc_ir, thermal, si
   post/       heat maps, reports
   cli.py      `pcbsim` command
 ```
