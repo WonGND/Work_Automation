@@ -404,6 +404,42 @@ Electrical geometry (copper, pads, vias) always comes from the ECAD side. The me
 
 ---
 
+## 9. KiCad board input (stage 6) — `pcbsim/io/sexpr.py`, `pcbsim/io/kicad.py`
+
+The reader follows the public KiCad file-format documentation [KiCad] (S-expression syntax; board and footprint files) and covers KiCad 6–9 boards.
+
+### 9.1 Coordinates
+
+KiCad stores millimetres with y pointing down. With the default `origin: board`, a file point maps to x = (x_f − x_min)·10⁻³ and y = (y_max,f − y_f)·10⁻³ m. Here x_min and y_max,f are the Edge.Cuts extents, so the lower-left board corner becomes (0, 0). `origin: aux` measures from `aux_axis_origin` instead, and `file` only negates y.
+
+A footprint-local point (x_l, y_l) maps to p = p_fp + R(θ)·(x_l, −y_l), where R is the counter-clockwise rotation by the footprint angle θ. In board files a pad's own angle already includes θ. Bottom footprints are stored already mirrored.
+
+### 9.2 Geometry
+
+* **Arcs** (start, mid, end) give the circumcentre and radius. They are split into n = ⌈|sweep| / (2 acos(1 − s/r))⌉ chords with sagitta s ≤ 1 µm.
+* **Tracks** are the centre line buffered by w/2 with round ends, which is exact for KiCad's round-capped tracks.
+* **Pads**: `rect`, `circle`, `oval` (stadium), `roundrect` (corner radius r = ratio·min(w, h)), and `custom` (anchor ∪ primitives) are exact. `trapezoid` uses its bounding rectangle and adds a note. Plated through-holes become vias spanning the pad's copper layers.
+* **Zones** use the saved `filled_polygon`s, which is what KiCad manufactures. An unfilled zone is approximated as its outline minus other-net copper (and other-net via barrels) grown by the zone clearance; higher-priority zones go first, and a note asks for a refill.
+* **Outline**: the Edge.Cuts items are polygonised. The largest ring is the board, and rings inside it are cutouts.
+* **Union**: all copper of one net on one layer is merged before rasterisation (§3.2). Cells are assigned by their centre, so a track narrower than the mesh cell may disappear; `pcbsim check` warns when that applies to a net that carries a port.
+
+### 9.3 Stack-up and materials
+
+`setup/stackup` gives copper and dielectric thicknesses, including `addsublayer` sub-layers. Each dielectric becomes a material `kicad:<layer>` based on `fr4` (or `ro4350b` when named), with the file's εr and tanδ. Solder mask becomes `kicad:F.Mask` / `kicad:B.Mask` based on `soldermask`. Thermal properties come from the base material because KiCad does not store them. Without a stack-up, every copper layer is 35 µm and the remaining board thickness is split evenly into FR-4 dielectrics, with a note.
+
+Via plating and fill are not in the file. The default is 25 µm copper, overridable per net or drill with `kicad.vias`.
+
+### 9.4 Verification (`tests/test_kicad.py`)
+
+* Arc chords lie on the circle and have sagitta ≤ 1 µm.
+* Pad areas: rect, circle, stadium, and rounded rectangle match closed forms within 0.4 %.
+* Track plus arc area equals w·L + πw²/4.
+* An outline with R2 corner arcs and a cutout has area 60·40 − (4 − π)r² − 24 mm² (to 10⁻⁵).
+* Rotated and bottom-side footprints are checked, as are KiCad 9 `(net "NAME")` references, the unfilled-zone approximation, and the missing-stack-up default.
+* **Physics parity**: the example board is written as a KiCad 8 file (`tests/kicad_fixtures.py`) and loaded with a YAML overlay. It gives the same IR drop, Joule power, and source current as the hand-written `examples/soc_4layer.yaml` to 10⁻⁹ relative, and Tj within 0.1 K. The KiCad copper adds annular rings and footprint pads, which the YAML model leaves out.
+
+---
+
 ## References
 
 * **[NIST SP 811]** A. Thompson, B. N. Taylor, *Guide for the Use of the International System of Units (SI)*, NIST SP 811, 2008.

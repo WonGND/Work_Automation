@@ -1,6 +1,6 @@
 """Command-line interface.
 
-    pcbsim check  config.yaml           validate a config and print a board summary
+    pcbsim check  config.yaml           validate a config (or a bare .kicad_pcb) and print a summary
     pcbsim run    config.yaml           run the configured solvers, write results/
     pcbsim report results/              build HTML/JSON reports (stage 7)
     pcbsim match  --gerber dir/ --drill x.drl --mech mech.dwg --map layers.yaml --report out.html
@@ -84,6 +84,14 @@ def summarize(cfg: LoadedConfig) -> str:
     )
     if cfg.source is not None:
         out.append(f"  source  {cfg.source}")
+    if cfg.kicad is not None:
+        kc = cfg.kicad.counts
+        out.append(
+            f"  KiCad   {cfg.kicad.path.name}: {kc.get('tracks', 0)} tracks, "
+            f"{kc.get('vias', 0)} vias (+{kc.get('plated_holes', 0)} plated holes), "
+            f"{kc.get('pads', 0)} pads, {kc.get('zones', 0)} zones, "
+            f"{kc.get('footprints', 0)} footprints"
+        )
 
     out.append("\nStack-up (top → bottom)")
     rows = []
@@ -195,6 +203,22 @@ def _model_checks(cfg: LoadedConfig) -> list[tuple[bool, str]]:
     for name in cfg.analysis.solvers:
         if name not in known:
             checks.append((False, f"solver {name!r} is not available yet"))
+    if cfg.kicad is not None:
+        for note in cfg.kicad.notes:
+            checks.append((False, f"KiCad: {note}"))
+        cell = cfg.analysis.mesh.cell / cfg.analysis.mesh.refine
+        thin = {n: w for n, w in cfg.kicad.min_width.items() if w < cell}
+        modelled = {s.net for s in b.shapes} & {p.net for p in b.ports}
+        for net_name, w in sorted(thin.items()):
+            if net_name in modelled:
+                checks.append(
+                    (
+                        False,
+                        f"KiCad: net {net_name} has {_mm(w)} mm tracks, narrower than the mesh "
+                        "cell "
+                        f"{_mm(cell)} mm — they may vanish; refine analysis.mesh",
+                    )
+                )
     return checks
 
 
