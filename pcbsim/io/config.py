@@ -52,6 +52,7 @@ from pcbsim.model import (
     Stackup,
     ThermalBoundary,
     ThermalBoundaryKind,
+    TransmissionLine,
     Via,
 )
 from pcbsim.units import Kind, parse_quantity, to_si
@@ -306,6 +307,18 @@ class PortSpec(_HasGeom):
         return v
 
 
+class TransmissionLineSpec(_Model):
+    name: str
+    layer: str
+    width: PositiveLength
+    spacing: PositiveLength | None = None
+    target: Annotated[float, Field(gt=0.0)] | None = Field(
+        default=None, description="Ω; single-ended Z0, or Zdiff for a pair"
+    )
+    references: list[str] = Field(default_factory=list)
+    tolerance_pct: Annotated[float, Field(gt=0.0, le=100.0)] | None = None
+
+
 class CriteriaSpec(_Model):
     ir_drop_pct: Annotated[float, Field(gt=0.0, le=100.0)] = 3.0
     tj_max_default: Temperature = 105.0 + 273.15
@@ -359,6 +372,7 @@ class ConfigSpec(_Model):
     components: list[ComponentSpec] = Field(default_factory=list)
     ports: list[PortSpec] = Field(default_factory=list)
     thermal_boundaries: list[ThermalBoundarySpec] = Field(default_factory=list)
+    transmission_lines: list[TransmissionLineSpec] = Field(default_factory=list)
     criteria: CriteriaSpec = Field(default_factory=CriteriaSpec)
     analysis: AnalysisSpec = Field(default_factory=AnalysisSpec)
     mechanical: MechanicalSpec | None = None
@@ -574,6 +588,18 @@ def _build_board(spec: ConfigSpec) -> Board:
         ports=tuple(ports),
         criteria=criteria,
         thermal_boundaries=tuple(boundaries),
+        transmission_lines=tuple(
+            TransmissionLine(
+                name=t.name,
+                layer=t.layer,
+                width=t.width,
+                spacing=t.spacing,
+                target=t.target,
+                references=tuple(t.references),
+                tolerance_pct=t.tolerance_pct,
+            )
+            for t in spec.transmission_lines
+        ),
     )
 
 

@@ -16,6 +16,7 @@ from pcbsim.model.board import (
     SinkDistribution,
     ThermalBoundary,
     ThermalBoundaryKind,
+    TransmissionLine,
     Via,
 )
 from pcbsim.model.geometry import Polygon
@@ -40,5 +41,6 @@ __all__ = [
     "Stackup",
     "ThermalBoundary",
     "ThermalBoundaryKind",
+    "TransmissionLine",
     "Via",
 ]

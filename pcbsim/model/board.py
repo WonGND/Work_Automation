@@ -177,6 +177,28 @@ class ThermalBoundary:
 
 
 @dataclass(frozen=True, slots=True)
+class TransmissionLine:
+    """A controlled-impedance trace (or edge-coupled pair when ``spacing`` is set).
+
+    ``target`` is the single-ended Z0 for a single trace and the differential
+    impedance for a pair (Ω). ``references`` names the reference plane layers;
+    empty means the nearest conductor layers above and below.
+    """
+
+    name: str
+    layer: str
+    width: float
+    spacing: float | None = None
+    target: float | None = None
+    references: tuple[str, ...] = ()
+    tolerance_pct: float | None = None
+
+    @property
+    def differential(self) -> bool:
+        return self.spacing is not None
+
+
+@dataclass(frozen=True, slots=True)
 class Board:
     name: str
     outline: Polygon
@@ -188,6 +210,7 @@ class Board:
     ports: tuple[Port, ...] = ()
     criteria: Criteria = field(default_factory=Criteria)
     thermal_boundaries: tuple[ThermalBoundary, ...] = ()
+    transmission_lines: tuple[TransmissionLine, ...] = ()
 
     def net(self, name: str) -> Net:
         for n in self.nets:
@@ -286,6 +309,23 @@ class Board:
                 problems.append(f"{where}: region extends outside the board")
             if p.kind is PortKind.CURRENT_SINK and p.value < 0.0:
                 problems.append(f"{where}: sink current must be >= 0")
+
+        tl_names = [t.name for t in self.transmission_lines]
+        for n in sorted({n for n in tl_names if tl_names.count(n) > 1}):
+            problems.append(f"duplicate transmission line name {n!r}")
+        for tl in self.transmission_lines:
+            where = f"transmission line {tl.name}"
+            need_conductor(where, tl.layer)
+            for r in tl.references:
+                need_conductor(where, r)
+                if r == tl.layer:
+                    problems.append(f"{where}: a line cannot reference its own layer")
+            if tl.width <= 0.0:
+                problems.append(f"{where}: width must be > 0")
+            if tl.spacing is not None and tl.spacing <= 0.0:
+                problems.append(f"{where}: spacing must be > 0")
+            if tl.target is not None and tl.target <= 0.0:
+                problems.append(f"{where}: target impedance must be > 0")
 
         refs_set = set(refs)
         tb_names = [t.name for t in self.thermal_boundaries]
