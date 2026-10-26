@@ -75,7 +75,7 @@ class Similarity2D:
         corners = np.array(
             [[-extent, -extent], [extent, -extent], [extent, extent], [-extent, extent]]
         )
-        return float(np.linalg.norm(self.apply(corners) - other.apply(corners), axis=1).max())
+        return float(np.max(np.linalg.norm(self.apply(corners) - other.apply(corners), axis=1)))
 
     def to_dict(self) -> dict[str, Any]:
         return {

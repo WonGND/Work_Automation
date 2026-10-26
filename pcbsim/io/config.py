@@ -337,6 +337,15 @@ class AnalysisSpec(_Model):
         return self
 
 
+class MechanicalSpec(_Model):
+    """Link to an ECAD–MCAD match result (``pcbsim match --json``)."""
+
+    match: str
+    offset: tuple[Length, Length] = (0.0, 0.0)
+    apply_boundaries: bool = True
+    require_ok: bool = True
+
+
 class ConfigSpec(_Model):
     version: Literal[1] = 1
     name: str = "board"
@@ -352,6 +361,7 @@ class ConfigSpec(_Model):
     thermal_boundaries: list[ThermalBoundarySpec] = Field(default_factory=list)
     criteria: CriteriaSpec = Field(default_factory=CriteriaSpec)
     analysis: AnalysisSpec = Field(default_factory=AnalysisSpec)
+    mechanical: MechanicalSpec | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -369,11 +379,23 @@ class AnalysisConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class MechanicalLink:
+    """Resolved ``mechanical:`` section: the match file and whether it passed."""
+
+    match_path: Path
+    ok: bool
+    require_ok: bool
+    ng_items: tuple[str, ...] = ()
+    applied_boundaries: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class LoadedConfig:
     board: Board
     materials: MaterialDB
     analysis: AnalysisConfig
     source: Path | None = None
+    mechanical: MechanicalLink | None = None
 
 
 def format_loc(loc: Sequence[int | str]) -> str:
@@ -586,6 +608,9 @@ def load_config_dict(data: Mapping[str, Any], base_dir: Path | None = None) -> L
         raise ConfigError("\n".join(problems))
 
     board = _build_board(spec)
+    mech_link: MechanicalLink | None = None
+    if spec.mechanical is not None:
+        board, mech_link = _apply_mechanical(spec.mechanical, board, base_dir or Path.cwd())
     try:
         board.validate()
     except ModelError as exc:
@@ -599,7 +624,56 @@ def load_config_dict(data: Mapping[str, Any], base_dir: Path | None = None) -> L
         output_dir=out_dir if out_dir.is_absolute() else base / out_dir,
         options={k: dict(v) for k, v in a.options.items()},
     )
-    return LoadedConfig(board=board, materials=db, analysis=analysis)
+    return LoadedConfig(board=board, materials=db, analysis=analysis, mechanical=mech_link)
+
+
+def _apply_mechanical(ms: MechanicalSpec, board: Board, base: Path) -> tuple[Board, MechanicalLink]:
+    """Append the match result's thermal boundaries (board frame + ``offset``)."""
+    from dataclasses import replace
+
+    from pcbsim.registration.pipeline import load_match
+
+    path = Path(ms.match)
+    path = path if path.is_absolute() else base / path
+    stored = load_match(path)
+    applied: list[ThermalBoundary] = []
+    if ms.apply_boundaries:
+        existing = {t.name for t in board.thermal_boundaries}
+        refs = {c.ref for c in board.components}
+        for mb in stored.boundaries:
+            if mb.name in existing:
+                continue
+            if mb.component is not None and mb.component not in refs:
+                continue
+            if mb.component is not None:
+                comp = next(c for c in board.components if c.ref == mb.component)
+                region, side = comp.footprint, comp.side
+            else:
+                assert mb.polygon is not None
+                pts = np.asarray(mb.polygon, dtype=np.float64) + np.asarray(ms.offset)
+                region, side = Polygon(pts), Side(mb.side)
+            applied.append(
+                ThermalBoundary(
+                    name=mb.name,
+                    kind=ThermalBoundaryKind(mb.kind),
+                    side=side,
+                    region=region,
+                    temperature=mb.temperature,
+                    h=mb.h,
+                    resistance=mb.resistance,
+                    ambient=mb.ambient,
+                    component=mb.component,
+                )
+            )
+    board = replace(board, thermal_boundaries=board.thermal_boundaries + tuple(applied))
+    link = MechanicalLink(
+        match_path=path,
+        ok=stored.ok,
+        require_ok=ms.require_ok,
+        ng_items=stored.ng_items,
+        applied_boundaries=tuple(t.name for t in applied),
+    )
+    return board, link
 
 
 def load_config(path: str | Path) -> LoadedConfig:
@@ -614,4 +688,10 @@ def load_config(path: str | Path) -> LoadedConfig:
     except yaml.YAMLError as exc:
         raise ConfigError(f"{p}: YAML syntax error: {exc}") from None
     loaded = load_config_dict(data, base_dir=p.parent.resolve())
-    return LoadedConfig(loaded.board, loaded.materials, loaded.analysis, source=p.resolve())
+    return LoadedConfig(
+        loaded.board,
+        loaded.materials,
+        loaded.analysis,
+        source=p.resolve(),
+        mechanical=loaded.mechanical,
+    )

@@ -3,6 +3,8 @@
     pcbsim check  config.yaml           validate a config and print a board summary
     pcbsim run    config.yaml           run the configured solvers, write results/
     pcbsim report results/              build HTML/JSON reports (stage 7)
+    pcbsim match  --gerber dir/ --drill x.drl --mech mech.dwg --map layers.yaml --report out.html
+                                        ECAD–MCAD registration + checks (+ match.json)
     pcbsim solvers                      list registered solver plugins
 
 The ``check`` output mirrors the pre-simulation validation step of common PDN
@@ -10,7 +12,8 @@ tools: stack-up table, per-net source/sink table, heat sources, then a
 pass/fail list of model checks. ``run`` prints a per-sink IR-drop table (the
 text form of a power tree), per-layer peak current density and the violation
 list. Exit codes: 0 ok, 1 invalid input, 2 usage error, 3 not implemented yet,
-4 design violations found.
+4 design violations found (``match``: NG items), 5 simulation refused because the
+linked ECAD–MCAD match is NG (override with ``run --force``).
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ EXIT_INVALID = 1
 EXIT_USAGE = 2
 EXIT_NOT_IMPLEMENTED = 3
 EXIT_VIOLATIONS = 4
+EXIT_MECH_NG = 5
 
 
 def _table(
@@ -57,7 +61,9 @@ def _table(
     return "\n".join([fmt(header), rule, *(fmt(r) for r in rows)])
 
 
-def _mm(x: float, nd: int = 3) -> str:
+def _mm(x: float | None, nd: int = 3) -> str:
+    if x is None:
+        return "-"
     return f"{from_si(x, 'mm', 'length'):.{nd}f}"
 
 
@@ -295,8 +301,33 @@ def _print_thermal(rs: ResultSet, layers: Sequence[str], out: TextIO) -> None:
         )
 
 
+def _mech_gate(cfg: LoadedConfig, force: bool, out: TextIO) -> bool:
+    """Print the linked match status; return False if the run must stop."""
+    m = cfg.mechanical
+    if m is None:
+        return True
+    applied = ", ".join(m.applied_boundaries) or "none"
+    print(f"Mechanical match {m.match_path}  ({'OK' if m.ok else 'NG'})", file=out)
+    print(f"  thermal boundaries from MCAD: {applied}", file=out)
+    if m.ok or not m.require_ok:
+        return True
+    print(f"  [warn] ECAD–MCAD match has {len(m.ng_items)} NG item(s):", file=out)
+    for item in m.ng_items[:20]:
+        print(f"    {item}", file=out)
+    if force:
+        print("  [warn] --force given: simulating anyway", file=out)
+        return True
+    print(
+        "error: ECAD–MCAD match is NG; fix the drawing/board or rerun with --force",
+        file=sys.stderr,
+    )
+    return False
+
+
 def cmd_run(args: argparse.Namespace, out: TextIO) -> int:
     cfg = load_config(args.config)
+    if not _mech_gate(cfg, args.force, out):
+        return EXIT_MECH_NG
     known = available_solvers()
     requested = list(args.solver) if args.solver else list(cfg.analysis.solvers)
     if args.solver:
@@ -357,6 +388,68 @@ def cmd_report(args: argparse.Namespace, out: TextIO) -> int:
     return EXIT_NOT_IMPLEMENTED
 
 
+def cmd_match(args: argparse.Namespace, out: TextIO) -> int:
+    from pcbsim.registration.layermap import load_layer_map
+    from pcbsim.registration.pipeline import run_match, write_match
+    from pcbsim.registration.report import write_report
+
+    if args.gerber is None and not args.drill:
+        print("error: give --gerber and/or --drill", file=sys.stderr)
+        return EXIT_USAGE
+    lmap = load_layer_map(args.map)
+    mech = [Path(p) for p in args.mech] + [Path(p) for p in (args.step or [])]
+    m = run_match(
+        Path(args.gerber) if args.gerber else None,
+        [Path(p) for p in args.drill or []],
+        mech,
+        lmap,
+        Path(args.pnp) if args.pnp else None,
+    )
+    r = m.registration
+    t = r.transform
+    print("Registration (drawing → board)", file=out)
+    print(
+        f"  rotation {t.angle_deg:.4f}°   translation ({_mm(t.tx)}, {_mm(t.ty)}) mm   "
+        f"mirror {'yes' if t.mirror else 'no'}   scale {t.scale:.6g}",
+        file=out,
+    )
+    o = f"   outline RMS {_mm(r.outline_rms, 4)} mm" if r.outline_rms is not None else ""
+    print(
+        f"  matched {len(r.matches)}/{r.n_src} features   RMS {_mm(r.rms, 4)} mm{o}",
+        file=out,
+    )
+    for w in r.warnings:
+        print(f"  [warn] {w}", file=out)
+    rows = [
+        [
+            i.status.value,
+            i.category,
+            i.subject,
+            "-" if i.value is None else f"{i.value:.3f}",
+            "-" if i.limit is None else f"{i.limit:.3f}",
+            i.unit,
+        ]
+        for i in m.report.items
+        if i.status.value != "OK" or args.verbose
+    ]
+    if rows:
+        print("\nChecks" + ("" if args.verbose else " (NG / WARN only)"), file=out)
+        print(_table(rows, ["result", "check", "item", "value", "limit", "unit"], {3, 4}), file=out)
+    if m.boundaries:
+        print("\nThermal boundaries from MCAD", file=out)
+        for b in m.boundaries:
+            print(f"  {b.name:20s} {b.kind:18s} {b.note}", file=out)
+    written: list[Path] = []
+    if args.report:
+        written += write_report(m, Path(args.report), Path(args.json) if args.json else None)
+    elif args.json:
+        written.append(write_match(m, Path(args.json)))
+    for p in written:
+        print(f"Wrote {p}", file=out)
+    print("PASS" if m.ok else f"NG ({m.report.n_ng} item(s))", file=out)
+    return EXIT_OK if m.ok else EXIT_VIOLATIONS
+
+
 def cmd_solvers(args: argparse.Namespace, out: TextIO) -> int:
     solvers = available_solvers()
     if not solvers:
@@ -381,11 +474,28 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--solver", action="append", help="run only this solver (repeatable)")
     r.add_argument("--out", help="output directory (default: analysis.output_dir)")
     r.add_argument("--no-plots", action="store_true", help="skip PNG heat maps")
+    r.add_argument(
+        "--force", action="store_true", help="simulate even if the linked ECAD–MCAD match is NG"
+    )
     r.set_defaults(func=cmd_run)
 
     rep = sub.add_parser("report", help="build HTML/JSON reports from a results directory")
     rep.add_argument("results")
     rep.set_defaults(func=cmd_report)
+
+    m = sub.add_parser("match", help="register a mechanical drawing to Gerber/Excellon and check")
+    m.add_argument("--gerber", help="directory with Gerber (X2) files")
+    m.add_argument("--drill", action="append", help="Excellon drill file (repeatable)")
+    m.add_argument(
+        "--mech", action="append", required=True, help="DXF / DWG / STEP file (repeatable)"
+    )
+    m.add_argument("--step", action="append", help="extra STEP file(s) for 3D parts")
+    m.add_argument("--pnp", help="pick-and-place / centroid CSV (overrides Gerber X3)")
+    m.add_argument("--map", help="layer-map YAML (layer names, tolerances, thermal models)")
+    m.add_argument("--report", help="write the HTML report here (JSON next to it)")
+    m.add_argument("--json", help="write the match JSON here (for config 'mechanical.match')")
+    m.add_argument("-v", "--verbose", action="store_true", help="list OK checks too")
+    m.set_defaults(func=cmd_match)
 
     s = sub.add_parser("solvers", help="list available solver plugins")
     s.set_defaults(func=cmd_solvers)

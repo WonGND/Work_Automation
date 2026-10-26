@@ -36,3 +36,7 @@ class MaterialError(PcbsimError, KeyError):
 
 class SolverError(PcbsimError):
     """A solver could not be found, configured, or failed to converge."""
+
+
+class CadFormatError(PcbsimError, ValueError):
+    """A CAD/CAM input file (Gerber, Excellon, DXF, DWG, STEP) is malformed or unsupported."""

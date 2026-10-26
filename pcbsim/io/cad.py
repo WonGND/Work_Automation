@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
 FloatArray = NDArray[np.float64]
@@ -86,6 +87,8 @@ class GerberLayer:
     empty when the file carries no X2 attributes (then guessed from the file
     name, see :func:`pcbsim.io.gerber.guess_function`).
     ``geometry`` is the dark image after applying LPD/LPC in order.
+    ``paths`` holds the centre lines of every D01 stroke / arc and every region
+    contour (closed) — used to rebuild board outlines independent of line width.
     """
 
     path: Path | None
@@ -96,6 +99,7 @@ class GerberLayer:
     components: list[PlacedComponent] = field(default_factory=list)
     file_attributes: dict[str, tuple[str, ...]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    paths: list[LineString] = field(default_factory=list)
 
     @property
     def kind(self) -> str:
@@ -157,11 +161,11 @@ class Mesh3D:
 
     @property
     def z_min(self) -> float:
-        return float(self.vertices[:, 2].min()) if len(self.vertices) else 0.0
+        return float(np.min(self.vertices[:, 2])) if len(self.vertices) else 0.0
 
     @property
     def z_max(self) -> float:
-        return float(self.vertices[:, 2].max()) if len(self.vertices) else 0.0
+        return float(np.max(self.vertices[:, 2])) if len(self.vertices) else 0.0
 
 
 @dataclass(frozen=True, slots=True)
