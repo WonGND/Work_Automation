@@ -126,7 +126,7 @@ _TOK = re.compile(r"\s*(\$\d+|\d+\.?\d*|\.\d+|[-+xX/()])")
 
 def eval_expr(text: str, var: dict[int, float]) -> float:
     """Evaluate a macro arithmetic expression (§4.5.4): ``x``/``X`` is multiplication."""
-    tokens = _TOK.findall(text.replace(" ", ""))
+    tokens: list[str] = _TOK.findall(text.replace(" ", ""))
     if "".join(tokens) != text.replace(" ", ""):
         raise CadFormatError(f"bad macro expression {text!r}")
     pos = 0
@@ -137,7 +137,8 @@ def eval_expr(text: str, var: dict[int, float]) -> float:
     def take() -> str:
         nonlocal pos
         pos += 1
-        return tokens[pos - 1]
+        tok: str = tokens[pos - 1]
+        return tok
 
     def atom() -> float:
         t = take()
@@ -237,7 +238,7 @@ def _std_aperture(kind: str, params: list[float], unit: float) -> Aperture:
         hole = p[2] if len(p) > 2 else 0.0
         dia = min(w, h)
     elif kind == "P":
-        d, n = p[0], int(round(params[1]))
+        d, n = p[0], round(params[1])
         rot = params[2] if len(params) > 2 else 0.0
         hole = p[3] if len(p) > 3 else 0.0
         if not 3 <= n <= 12:
@@ -274,7 +275,7 @@ def _macro_shape(body: list[str], params: list[float], unit: float) -> BaseGeome
         code = int(fields[0])
         a = [eval_expr(f, var) for f in fields[1:]]
         u = unit
-        exposure = int(round(a[0])) if a else 1
+        exposure = round(a[0]) if a else 1
         if code == 1:
             g: BaseGeometry = _circle(a[2] * u, a[3] * u, a[1] * u)
             rot = a[4] if len(a) > 4 else 0.0
@@ -293,12 +294,12 @@ def _macro_shape(body: list[str], params: list[float], unit: float) -> BaseGeome
             g = shp_box(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
             rot = a[5] if len(a) > 5 else 0.0
         elif code == 4:
-            n = int(round(a[1]))
+            n = round(a[1])
             pts = [(a[2 + 2 * k] * u, a[3 + 2 * k] * u) for k in range(n + 1)]
             g = shapely.make_valid(Polygon(pts))
             rot = a[4 + 2 * n] if len(a) > 4 + 2 * n else 0.0
         elif code == 5:
-            n = int(round(a[1]))
+            n = round(a[1])
             cx, cy, d = a[2] * u, a[3] * u, a[4] * u
             rot = a[5] if len(a) > 5 else 0.0
             g = Polygon(
@@ -409,10 +410,7 @@ def _arc_points(
     r1 = math.hypot(x1 - cx, y1 - cy)
     a0 = math.atan2(y0 - cy, x0 - cx)
     a1 = math.atan2(y1 - cy, x1 - cx)
-    if cw:
-        sweep = (a0 - a1) % (2 * math.pi)
-    else:
-        sweep = (a1 - a0) % (2 * math.pi)
+    sweep = (a0 - a1) % (2 * math.pi) if cw else (a1 - a0) % (2 * math.pi)
     if st.multi_quadrant and math.hypot(x1 - x0, y1 - y0) < 1e-12:
         sweep = 2 * math.pi
     if sweep == 0.0 and st.multi_quadrant:
@@ -497,7 +495,7 @@ class _Parser:
         digits = text.lstrip("+-")
         if st.trailing:
             digits = digits.ljust(st.n_int + st.n_dec, "0")
-        return sign * int(digits) / 10**st.n_dec * st.unit
+        return sign * int(digits) / 10.0**st.n_dec * st.unit
 
     # ---------------------------------------------------------------- run
 

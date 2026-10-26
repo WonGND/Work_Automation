@@ -77,9 +77,9 @@ def _value(text: str, fmt: _Fmt) -> float:
     if fmt.zeros == "LZ":
         total = fmt.n_int + fmt.n_dec
         digits = digits.ljust(total, "0")
-        v = int(digits) / 10 ** (len(digits) - fmt.n_int)
+        v = int(digits) / 10.0 ** (len(digits) - fmt.n_int)
     else:
-        v = int(digits) / 10**fmt.n_dec
+        v = int(digits) / 10.0**fmt.n_dec
     return sign * v * fmt.unit
 
 
