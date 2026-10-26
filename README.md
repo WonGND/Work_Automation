@@ -12,6 +12,8 @@ pcbsim reads a board description (a YAML config now, KiCad `.kicad_pcb` later), 
 | `si`        | microstrip, stripline and differential Z0; 2D FEM cross-check   | stage 5  |
 | `em_openems`| S-parameters via openEMS (optional)                             | stage 8  |
 
+**ECAD–MCAD registration** (`pcbsim match`): aligns a DXF/DWG/STEP mechanical drawing with the Gerber X2/X3 + Excellon board (RANSAC → Umeyama → outline ICP). It checks holes, outline, cutouts, component placement, and height clearance, and turns heat sinks, chassis contacts, and the case air gap into thermal boundaries for `pcbsim run`. See [`docs/registration.md`](docs/registration.md).
+
 The physics comes only from public sources: textbooks, papers, IPC standards, and open-source project documentation. Each formula is listed with its reference in [`docs/theory.md`](docs/theory.md).
 
 ## Install
@@ -29,6 +31,11 @@ pcbsim check examples/soc_4layer.yaml   # validate the config and print a board 
 pcbsim solvers                          # list registered solver plugins
 pcbsim run examples/soc_4layer.yaml     # stage 2+
 pcbsim report results/                  # stage 7
+
+# ECAD–MCAD match (examples/mech)
+pcbsim match --gerber examples/mech/gerber --mech examples/mech/mech.dxf \
+             --map examples/mech/layers.yaml --report out/match.html --json out/match.json
+pcbsim run examples/mech/soc_with_mech.yaml   # add --force to simulate despite an NG match
 ```
 
 ## Config format
@@ -40,7 +47,10 @@ See [`examples/soc_4layer.yaml`](examples/soc_4layer.yaml) for a complete exampl
 ```
 pcbsim/
   model/      Board, Stackup, Layer, Net, Shape(Polygon), Via, Component, Port, Criteria
-  io/         YAML config loader (pydantic v2); KiCad parser in stage 6
+  io/         YAML config loader (pydantic v2); Gerber X2/X3, Excellon, PnP CSV;
+              DXF (ezdxf), DWG via ODA/LibreDWG, STEP via cadquery (optional);
+              KiCad parser in stage 6
+  registration/  ECAD–MCAD registration, checks, report, thermal boundaries
   materials/  YAML material DB (σ, α, εr, tanδ, k, ρ, cp, ε)
   mesh/       2.5D per-layer grids
   solvers/    Solver ABC + registry (entry-point group "pcbsim.solvers")

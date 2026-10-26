@@ -235,6 +235,76 @@ Implemented in stage 2; see §3.7.
 * Stripline and differential pairs: IPC-2141A equations [IPC-2141A], [Wadell].
 * Cross-check: a 2D electrostatic FEM cross-section solve (scikit-fem) of ∇·(ε∇φ) = 0 gives per-unit-length capacitance C (with dielectric) and C₀ (in air), from which Z0 = 1 / (c₀ √(C C₀)) and ε_eff = C / C₀.
 
+## 8. ECAD–MCAD registration — `pcbsim/io/{gerber,excellon,dxf,dwg,step}.py`, `pcbsim/registration/`
+
+Only public format specifications are used: the Ucamco Gerber Layer Format Specification (RS-274X, X2, X3) [Gerber], the Excellon NC drill format [Excellon], the Autodesk DXF Reference [DXF], and the public command-line documentation of ODA File Converter and LibreDWG for DWG → DXF conversion [ODA], [LibreDWG]. DWG binaries are never parsed by pcbsim. IPC-2581 and ODB++ are public too; they are listed as future inputs and are not implemented yet. No CAD or CAM software was disassembled or reverse-engineered.
+
+### 8.1 Input geometry
+
+| item | formula / rule | source |
+| --- | --- | --- |
+| Gerber coordinate | `v = n · 10^−d` (format `%FSLAXidYid%`), unit `%MOMM%` / `%MOIN%` | [Gerber] §4.2, §4.9 |
+| arc centre (G75) | `c = p_start + (I, J)`; start = end ⇒ full circle | [Gerber] §4.7.2 |
+| arc centre (G74) | candidate `p_start + (±I, ±J)` whose sweep is ≤ 90° | [Gerber] §8.2.3 |
+| arc flattening | `n = ⌈θ / (2 acos(1 − s/r))⌉`, sagitta `s` ≤ 1 µm, n ≥ 64 per full turn (area error ≤ 0.16 %) | geometry |
+| stroke, circular aperture | Minkowski sum of the centre line and a disc = buffer by d/2 | [Gerber] §4.8 |
+| stroke, rectangular aperture | convex hull of the rectangle at both end points | [Gerber] §4.8 |
+| macro expressions | `+ − x /` with precedence, unary minus, `$n` variables | [Gerber] §4.5.4 |
+| polarity | image = (((D₁ ∪ D₂) ∖ C₁) ∪ D₃) … in file order | [Gerber] §4.9.2 |
+| Excellon `LZ` | leading zeros kept ⇒ `v = int(digits) / 10^(len − n_int)` | [Excellon] |
+| Excellon `TZ` | trailing zeros kept ⇒ `v = int(digits) / 10^n_dec` | [Excellon] |
+| DXF units | `$INSUNITS` code → metres (1 in, 4 mm, 5 cm, 6 m, 9 mil, 13 µm …) | [DXF] HEADER |
+| DXF bulge | arc angle `θ = 4 atan(bulge)` (group code 42) | [DXF] LWPOLYLINE |
+| DXF OCS | arbitrary axis algorithm: `Ax = Wy × N` if \|Nx\|,\|Ny\| < 1/64 else `Wz × N`; `Ay = N × Ax` | [DXF] "Object Coordinate Systems" |
+| DXF 2.5D | item spans `[elevation, elevation + thickness]` (group codes 38, 39) | [DXF] |
+
+### 8.2 Registration
+
+The unknown transform maps drawing points `x` to board points `y`:
+
+    y = s · R(θ) · M · x + t,    M = diag(−1, 1) for a bottom-view drawing, else I
+
+1. **Hypotheses (RANSAC, 2-point minimal sets)** [Fischler-Bolles]. Each drawing pair (a, b) is paired with each board pair (a′, b′) of equal length (`|s·|ab| − |a′b′|| ≤ tol`, binary search in the sorted pair lengths) and compatible diameters. θ follows from the pair directions. Mirror and each candidate scale (1, 25.4, 1/25.4, 10, 0.1, 1000, 1/1000 when unit detection is enabled) are tested as separate hypotheses.
+2. **Consensus.** Features are inliers if the nearest compatible board feature (k-d tree) is within `tol`; matching is one-to-one, closest first.
+3. **Refinement — weighted Umeyama / Kabsch** [Umeyama-1991], [Kabsch-1976]:
+
+        μx = Σwx/Σw,  μy = Σwy/Σw,  Σxy = Σ w (y−μy)(x−μx)ᵀ / Σw
+        U D Vᵀ = svd(Σxy),  S = diag(1, sign(det U · det V))
+        R = U S Vᵀ,  s = tr(D S)/σx²  (or fixed),  t = μy − s R μx
+
+   `S` forces a proper rotation, so a reflection is only ever introduced through `M`. Re-match → re-fit until the correspondence set is stable.
+4. **Ambiguity.** Refined hypotheses that tie on inlier count and RMS are clustered (two transforms are the same if they move every point of the board-sized square by less than `tol`). More than one cluster means the reference pattern is symmetric, e.g. four holes in a rectangle. pcbsim reports NG and asks for an asymmetric reference hole or an `anchors` entry instead of guessing.
+5. **Outline ICP** [Besl-McKay-1992]. Drawing outline samples (even spacing plus every vertex) are projected onto the exact nearest point of the board outline segments. Hole pairs and outline samples are refitted jointly with step 3 (outline weight 0.2 per hole-equivalent) until the update moves no point by more than 1e-12 m. Feature RMS, maximum residual, and outline RMS before and after ICP are reported.
+
+With exact data the true transform is a fixed point of every step, which is what the 1e-6 mm recovery tests rely on.
+
+### 8.3 Checks
+
+| check | measure | default limit |
+| --- | --- | --- |
+| hole position | `|p_mech − p_drill|` of nearest pairs (one-to-one within 2 mm) | 0.1 mm |
+| hole diameter | `d_mech − d_drill` | ±0.1 mm |
+| hole missing / extra | unpaired drill ≥ 1 mm / unpaired drawing hole | NG |
+| outline | symmetric Hausdorff `d_H(A,B) = max(sup_a d(a,B), sup_b d(b,A))` of the exterior rings (densified to 5 % of each segment) | 0.2 mm |
+| cutouts | interior rings paired by centroid, Hausdorff per pair; unpaired = NG | 0.2 mm |
+| component position | body footprint centroid vs. placement point (X3 `ComponentMain`, `TO.C` pad centroid, or PnP CSV) | 0.5 mm |
+| component rotation | orientation of the minimum rotated rectangle vs. placement rotation, modulo 90° (a box cannot tell 0° from 90°) | 2° |
+| height | clearance = ceiling − z_top; ceiling = min(case height, keepout limit over the footprint, underside of case items above it) | ≥ 0.5 mm |
+
+### 8.4 Thermal boundary conditions from the mechanical model
+
+Electrical geometry (copper, pads, vias) always comes from the ECAD side. The mechanical drawing contributes only boundary conditions:
+
+* **Heat sink with a given resistance** `R_sa` [K/W]: if it lies on a component, it becomes that component's case-to-ambient path in the JEDEC two-resistor model (§4.4); otherwise it is a convection patch with `h = 1/(R_sa · A)`.
+* **Plate-fin heat sink** [Incropera] §3.6.4–3.6.5, adiabatic tip with corrected length `L_c = H + t/2`:
+
+        m = √(2h/(k t)),   η_f = tanh(m L_c)/(m L_c)
+        A_f = 2 L_c ℓ,   A_b = A_base − N t ℓ,   A_t = N A_f + A_b
+        η_o = 1 − (N A_f / A_t)(1 − η_f),   R_sa = 1/(η_o h A_t)
+
+* **Chassis contact**: an ideal contact is a fixed temperature. With a contact resistance `R_c` (or conductance `h_c`), a series resistance to a fixed temperature is exactly a Robin condition with `h = 1/(R_c A)`.
+* **Case air gap**: `h_gap = k_air / g` (pure conduction across a gap `g`). This holds while the Rayleigh number stays below the onset of convection, Ra < 1708 [Incropera] §9.8, which covers typical enclosure gaps of a few millimetres.
+
 ---
 
 ## References
@@ -267,3 +337,14 @@ Implemented in stage 2; see §3.7.
 * **[Swaminathan-Engin]** M. Swaminathan, A. E. Engin, *Power Integrity Modeling and Design for Semiconductors and Systems*, Prentice Hall, 2007.
 * **[Williams-1952]** M. L. Williams, "Stress singularities resulting from various boundary conditions in angular corners of plates in extension," *J. Appl. Mech.* 19, 1952 (corner singularity exponents for the Laplace/elasticity problems).
 * **[Ansys-SIwave-DCIR]** Ansys public online help: "Computing DC IR Simulations" and "Viewing DC IR Results" (SIwave 2025 R2). These pages were consulted only for workflow and UX conventions and for the publicly stated ρ(T) law; see `docs/ui_ux.md`.
+* **[Gerber]** Ucamco, *The Gerber Layer Format Specification*, revision 2023.08 (public), <https://www.ucamco.com/en/gerber>.
+* **[Excellon]** Excellon Automation, *CNC-7 Programming Manual* (format description), and the KiCad Excellon writer documentation <https://dev-docs.kicad.org/>.
+* **[DXF]** Autodesk, *DXF Reference* (AutoCAD 2012+), public online documentation; ezdxf documentation <https://ezdxf.readthedocs.io/>.
+* **[ODA]** Open Design Alliance, *ODA File Converter* command-line usage (public download page).
+* **[LibreDWG]** GNU LibreDWG manual, `dwg2dxf(1)`, <https://www.gnu.org/software/libredwg/>.
+* **[IPC-2581]** IPC-2581C, *Generic Requirements for Printed Board Assembly Products Manufacturing Description Data* (future input).
+* **[ODB++]** Siemens, *ODB++ Format Specification* v8.1 (public; future input).
+* **[Fischler-Bolles]** M. A. Fischler, R. C. Bolles, "Random sample consensus," *Commun. ACM* 24(6), 1981.
+* **[Umeyama-1991]** S. Umeyama, "Least-squares estimation of transformation parameters between two point patterns," *IEEE TPAMI* 13(4), 1991.
+* **[Kabsch-1976]** W. Kabsch, "A solution for the best rotation to relate two sets of vectors," *Acta Cryst.* A32, 1976.
+* **[Besl-McKay-1992]** P. J. Besl, N. D. McKay, "A method for registration of 3-D shapes," *IEEE TPAMI* 14(2), 1992.

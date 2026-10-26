@@ -74,3 +74,16 @@ analysis:
 ```
 
 Material properties (SI): `sigma`, `alpha_r`, `t_ref` [K], `eps_r`, `tan_d`, `k_inplane`, `k_through` (or the shorthand `k`), `density`, `cp`, `emissivity`, `description`, `source`.
+
+### `mechanical` (optional)
+
+Links a `pcbsim match --json` result (see [registration.md](registration.md)):
+
+```yaml
+mechanical:
+  match: match.json        # relative to this config
+  offset: [0, 0]           # config origin − Gerber origin (length)
+  apply_boundaries: true   # append heat sink / chassis / case boundaries
+  require_ok: true         # an NG match stops `pcbsim run` (exit 5) unless --force
+```
+
