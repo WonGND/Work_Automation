@@ -1,0 +1,29 @@
+# Layer map for the FreeCAD-style example drawing (examples/mech/mech.dxf)
+mech:
+  outline: "OUTLINE"
+  holes: "HOLES"
+  comp_3d: "COMP_(?P<ref>.+)"
+  heatsink: "HS_.*"
+  keepout: "KEEPOUT_H(?P<h>[0-9.]+)"
+  chassis: "CHASSIS.*"
+  case: "CASE.*"
+ecad:
+  ref_holes: npth
+  ref_hole_min_diameter: 1.5
+registration:
+  tol: 0.3
+  mirror: auto
+  allow_scale: true
+checks:
+  hole_position_tol: 0.1
+  hole_diameter_tol: 0.1
+  mech_hole_min_diameter: 1.5
+  outline_tol: 0.2
+  cutout_tol: 0.2
+  component_position_tol: 0.5
+  component_rotation_tol: 2.0
+  min_clearance: 0.5
+heatsinks:
+  - { layers: "HS_U1", component: U1, resistance: 6.0 }
+chassis: { temperature: 45 }
+case: { temperature: 40 }
