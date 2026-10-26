@@ -93,7 +93,10 @@ def _header(function: str) -> str:
 
 def gerber_profile() -> str:
     x0, y0, x1, y1 = 0.0, 0.0, W, H
-    s = _header("Profile,NP") + "%TA.AperFunction,Profile*%\n%ADD10C,0.050000*%\n%TD*%\nD10*\nG75*\n"
+    s = (
+        _header("Profile,NP")
+        + "%TA.AperFunction,Profile*%\n%ADD10C,0.050000*%\n%TD*%\nD10*\nG75*\n"
+    )
     s += f"X{_c(x0 + R)}Y{_c(y0)}D02*\nG01*\nX{_c(x1 - R)}Y{_c(y0)}D01*\n"
     s += f"G03*\nX{_c(x1)}Y{_c(y0 + R)}I0J{_c(R)}D01*\nG01*\nX{_c(x1)}Y{_c(y1 - R)}D01*\n"
     s += f"G03*\nX{_c(x1 - R)}Y{_c(y1)}I-{_c(R)}J0D01*\nG01*\nX{_c(x0 + R)}Y{_c(y1)}D01*\n"
@@ -115,7 +118,10 @@ def gerber_copper() -> str:
 
 
 def gerber_components() -> str:
-    s = _header("Component,L1,Top") + "%TA.AperFunction,ComponentMain*%\n%ADD10C,0.300000*%\n%TD*%\n"
+    s = (
+        _header("Component,L1,Top")
+        + "%TA.AperFunction,ComponentMain*%\n%ADD10C,0.300000*%\n%TD*%\n"
+    )
     s += "D10*\n"
     for p in PARTS:
         s += (

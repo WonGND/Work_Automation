@@ -25,7 +25,10 @@ from pcbsim.registration.transform import Similarity2D
 from tests.cad_fixtures import Defects, drawing_transform, write_project
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "soc_4layer.yaml"
-TOL = 1e-9  # m == 1e-6 mm
+# Through real file formats the outline ICP fits Gerber G75 chords against DXF ARC chords
+# (both sagitta ≤ 1 µm), leaving a few nm; the pure-math 1e-6 mm check is in
+# test_registration.py.
+TOL = 1e-8  # m == 1e-5 mm
 
 
 def _match(tmp_path: Path, **kw: object) -> tuple[MatchResult, Path, Path, Path]:
@@ -105,7 +108,7 @@ def test_injected_height_violation(tmp_path: Path) -> None:
     m, *_ = _match(tmp_path, defects=Defects(heatsink_height=12.8))
     (subject,) = _ng(m, "height")
     assert subject == "heatsink HS_U1"
-    keep = next(i for i in m.report.items if i.subject == "U3")
+    keep = next(i for i in m.report.items if i.category == "height" and i.subject == "U3")
     assert keep.status.value == "OK"
     assert "ceiling 2.00 mm" in keep.message
 
