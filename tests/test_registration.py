@@ -199,3 +199,17 @@ def test_icp_refines_small_offset() -> None:
 def test_too_few_features() -> None:
     with pytest.raises(RegistrationError, match="at least 2"):
         register([Feature(0, 0, 1e-3)], _dst())
+
+
+def test_icp_rejected_when_drawing_outline_is_wrong() -> None:
+    """A wrong drawing outline must not pull an exact hole fit (the check reports it)."""
+    t = Similarity2D(0.6, 0.02, -0.01, 1.0, False)
+    src, src_outline = _drawing_of(t)
+    from shapely import affinity
+
+    bad = affinity.translate(src_outline, 0.4e-3, 0.0)
+    assert isinstance(bad, Polygon)
+    res = register(src, _dst(), src_outline=bad, dst_outline=OUTLINE)
+    assert res.transform.distance_to(t, 0.06) < TOL_RECOVERY
+    assert res.outline_rms is not None
+    assert res.outline_rms > 1e-4

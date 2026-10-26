@@ -25,10 +25,7 @@ from pcbsim.registration.transform import Similarity2D
 from tests.cad_fixtures import Defects, drawing_transform, write_project
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "soc_4layer.yaml"
-# Through real file formats the outline ICP fits Gerber G75 chords against DXF ARC chords
-# (both sagitta ≤ 1 µm), leaving a few nm; the pure-math 1e-6 mm check is in
-# test_registration.py.
-TOL = 1e-8  # m == 1e-5 mm
+TOL = 1e-9  # m == 1e-6 mm, the required recovery accuracy
 
 
 def _match(tmp_path: Path, **kw: object) -> tuple[MatchResult, Path, Path, Path]:
@@ -69,9 +66,7 @@ def test_bottom_view_mirror_and_inch_units(tmp_path: Path) -> None:
     assert r.transform.scale == pytest.approx(25.4)
     assert r.unit_warning is not None
     assert "inch" in r.unit_warning
-    # The DXF reader flattens arcs to 1 µm *in drawing units*; read as mm but really
-    # inch, that is 25.4 µm of outline chord error after rescaling, which ICP sees.
-    assert r.transform.distance_to(_expected(t, 25.4), 0.05) < 10 * TOL
+    assert r.transform.distance_to(_expected(t, 25.4), 0.05) < TOL
     assert not _ng(m, "hole_position")
     assert not _ng(m, "component_position")
 

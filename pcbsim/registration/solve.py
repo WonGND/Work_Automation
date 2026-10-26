@@ -43,8 +43,10 @@ the correspondences in advance.
    point); holes and outline samples are fitted jointly with weights by the
    same Umeyama step, iterated to convergence [Besl-McKay-1992]. With exact
    data the true transform is a fixed point. The ICP result is accepted only
-   if it keeps every hole match and the hole RMS stays within max(2×, tol/10);
-   otherwise a wrong drawing outline would pull the fit, so it is discarded.
+   if it improves the outline RMS by more than 1 %, keeps every hole match, and
+   the hole RMS stays within max(2×, tol/10); otherwise the hole transform is
+   kept, so neither a wrong drawing outline nor arcs flattened coarser than the
+   board's can drag an exact hole fit.
    Anchors are checked after refinement (a 2-point hypothesis may miss a
    distant anchor by more than tol before refinement).
 
@@ -470,16 +472,21 @@ def register(
             t_icp = icp_refine(t, sp, dq, src_outline, dst_outline, opts)
             p_icp, r_icp = _match(t_icp, src, dst, tree, opts)
             rms_icp = float(np.sqrt((r_icp**2).mean())) if len(r_icp) else math.inf
-            # The outline is what the checks are about to judge, so it must not drag
-            # the hole fit: keep ICP only if it loses no match and the hole RMS stays
-            # within max(2×, tol/10).
-            if (
+            o_icp = outline_rms(t_icp, src_outline, dst_outline, opts.outline_samples)
+            # Accept ICP only if it pays off: the outline fit must improve by more than
+            # 1 %, no hole match may be lost, and the hole RMS must stay within
+            # max(2×, tol/10). Otherwise the transform from the holes is kept: a wrong
+            # drawing outline (what the checks are about to judge) or arcs flattened
+            # coarser than the board's must not drag an already exact hole fit.
+            gain = o_icp < 0.99 * o_rms_before
+            holes_ok = (
                 len(p_icp) >= len(pairs)
                 and rms_icp <= max(2.0 * rms, opts.tol * 0.1)
                 and _anchor_ok(t_icp, opts)
-            ):
+            )
+            if gain and holes_ok:
                 t, pairs, res, rms = t_icp, p_icp, r_icp, rms_icp
-            else:
+            elif gain:
                 warnings.append(
                     "outline ICP rejected: it degraded the hole fit (the drawing outline "
                     "probably differs from the board); transform from holes only"
