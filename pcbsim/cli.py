@@ -2,7 +2,7 @@
 
     pcbsim check  config.yaml           validate a config (or a bare .kicad_pcb) and print a summary
     pcbsim run    config.yaml           run the configured solvers, write results/
-    pcbsim report results/              build HTML/JSON reports (stage 7)
+    pcbsim report results/              self-contained HTML report (results/report.html)
     pcbsim match  --gerber dir/ --drill x.drl --mech mech.dwg --map layers.yaml --report out.html
                                         ECAD–MCAD registration + checks (+ match.json)
     pcbsim solvers                      list registered solver plugins
@@ -458,7 +458,7 @@ def cmd_run(args: argparse.Namespace, out: TextIO) -> int:
             print(f"  [{tag}] {v.message or v.check}", file=out)
 
     out_dir = Path(args.out) if args.out else cfg.analysis.output_dir
-    files = write_results(run, out_dir, plots=not args.no_plots)
+    files = write_results(run, out_dir, plots=not args.no_plots, report=args.report)
     print(f"\nWrote {len(files)} file(s) to {out_dir}", file=out)
     counts = violation_counts(run)
     n_fail = counts[Severity.VIOLATION]
@@ -563,8 +563,11 @@ def cmd_z0(args: argparse.Namespace, out: TextIO) -> int:
 
 
 def cmd_report(args: argparse.Namespace, out: TextIO) -> int:
-    print("pcbsim report: not implemented yet (arrives in stage 7).", file=sys.stderr)
-    return EXIT_NOT_IMPLEMENTED
+    from pcbsim.report import has_violations, write_report
+
+    path = write_report(args.results, args.out, args.title)
+    print(f"Wrote {path}", file=out)
+    return EXIT_VIOLATIONS if has_violations(args.results) else EXIT_OK
 
 
 def cmd_match(args: argparse.Namespace, out: TextIO) -> int:
@@ -659,13 +662,16 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--solver", action="append", help="run only this solver (repeatable)")
     r.add_argument("--out", help="output directory (default: analysis.output_dir)")
     r.add_argument("--no-plots", action="store_true", help="skip PNG heat maps")
+    r.add_argument("--report", action="store_true", help="also write report.html")
     r.add_argument(
         "--force", action="store_true", help="simulate even if the linked ECAD–MCAD match is NG"
     )
     r.set_defaults(func=cmd_run)
 
-    rep = sub.add_parser("report", help="build HTML/JSON reports from a results directory")
-    rep.add_argument("results")
+    rep = sub.add_parser("report", help="build a self-contained HTML report from a results dir")
+    rep.add_argument("results", help="directory written by 'pcbsim run' (has results.json)")
+    rep.add_argument("--out", help="HTML file (default: <results>/report.html)")
+    rep.add_argument("--title", help="report title")
     rep.set_defaults(func=cmd_report)
 
     m = sub.add_parser("match", help="register a mechanical drawing to Gerber/Excellon and check")

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -54,16 +55,37 @@ def order_solvers(names: list[str]) -> list[str]:
     return ordered
 
 
-def run_analysis(cfg: LoadedConfig, solvers: list[str] | None = None) -> RunResult:
+Progress = Callable[[int, int, str], None]
+
+
+def run_analysis(
+    cfg: LoadedConfig,
+    solvers: list[str] | None = None,
+    progress: Progress | None = None,
+    cell: float | None = None,
+) -> RunResult:
+    """Mesh once, then run the solvers in dependency order.
+
+    ``progress(i, n, label)`` is called before each step (``i`` = 0 … n−1: the mesh,
+    then one call per solver) and once more with ``i = n`` when done. ``cell``
+    overrides ``analysis.mesh`` (m).
+    """
     names = order_solvers(solvers if solvers is not None else list(cfg.analysis.solvers))
     classes = [get_solver(n) for n in names]
     mesh = cfg.analysis.mesh
-    grid = build_grid(cfg.board, mesh.cell / mesh.refine)
+    n_steps = len(names) + 1
+    if progress is not None:
+        progress(0, n_steps, "mesh")
+    grid = build_grid(cfg.board, cell if cell is not None else mesh.cell / mesh.refine)
     out = RunResult(cfg, grid)
-    for name, cls in zip(names, classes, strict=True):
+    for k, (name, cls) in enumerate(zip(names, classes, strict=True), 1):
+        if progress is not None:
+            progress(k, n_steps, name)
         ctx = SolverContext(cfg.board, cfg.materials, grid, dict(out.results), cfg.analysis.options)
         solver = cls(cfg.analysis.options.get(name, {}))
         out.results[name] = solver.run(ctx)
+    if progress is not None:
+        progress(n_steps, n_steps, "done")
     return out
 
 
@@ -83,6 +105,27 @@ def _clean(x: Any) -> Any:
     return x
 
 
+def _ring(points: Any) -> list[list[float]]:
+    return [[float(x), float(y)] for x, y in np.asarray(points)]
+
+
+def _geometry(run: RunResult) -> dict[str, Any]:
+    """Board outline, ports and component footprints (m) for reports and viewers."""
+    b = run.config.board
+    return {
+        "outline": _ring(b.outline.outer),
+        "holes": [_ring(h) for h in b.outline.holes],
+        "ports": [
+            {"name": p.name, "layer": p.layer, "kind": p.kind.value, "ring": _ring(p.region.outer)}
+            for p in b.ports
+        ],
+        "components": [
+            {"ref": c.ref, "side": c.side.value, "ring": _ring(c.footprint.outer)}
+            for c in b.components
+        ],
+    }
+
+
 def to_json_dict(run: RunResult) -> dict[str, Any]:
     g = run.grid
     doc: dict[str, Any] = {
@@ -97,7 +140,15 @@ def to_json_dict(run: RunResult) -> dict[str, Any]:
             "current_density": "A/m^2",
             "temperature": "K",
         },
-        "mesh": {"dx": g.dx, "dy": g.dy, "nx": g.nx, "ny": g.ny, "layers": list(g.layers)},
+        "mesh": {
+            "dx": g.dx,
+            "dy": g.dy,
+            "nx": g.nx,
+            "ny": g.ny,
+            "layers": list(g.layers),
+            "extent": list(g.extent),
+        },
+        "geometry": _geometry(run),
         "passed": run.passed,
         "solvers": {},
     }
@@ -128,8 +179,10 @@ def to_json_dict(run: RunResult) -> dict[str, Any]:
     return cleaned
 
 
-def write_results(run: RunResult, out_dir: Path, plots: bool = True) -> list[Path]:
-    """Write ``results.json`` (+ ``*.npz`` fields and PNG heat maps) to ``out_dir``."""
+def write_results(
+    run: RunResult, out_dir: Path, plots: bool = True, report: bool = False
+) -> list[Path]:
+    """Write ``results.json`` (+ ``*.npz`` fields, PNG heat maps, ``report.html``)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     p = out_dir / "results.json"
@@ -159,6 +212,10 @@ def write_results(run: RunResult, out_dir: Path, plots: bool = True) -> list[Pat
                         f"{rs.solver}: electro-thermal iteration",
                     )
                 )
+    if report:
+        from pcbsim.report import write_report
+
+        written.append(write_report(out_dir))
     return written
 
 
