@@ -250,6 +250,7 @@ Only public format specifications are used: the Ucamco Gerber Layer Format Speci
 | stroke, circular aperture | Minkowski sum of the centre line and a disc = buffer by d/2 | [Gerber] §4.8 |
 | stroke, rectangular aperture | convex hull of the rectangle at both end points | [Gerber] §4.8 |
 | macro expressions | `+ − x /` with precedence, unary minus, `$n` variables | [Gerber] §4.5.4 |
+| region | each G36/G37 contour is a dark object; contours are united | [Gerber] §4.10 |
 | polarity | image = (((D₁ ∪ D₂) ∖ C₁) ∪ D₃) … in file order | [Gerber] §4.9.2 |
 | Excellon `LZ` | leading zeros kept ⇒ `v = int(digits) / 10^(len − n_int)` | [Excellon] |
 | Excellon `TZ` | trailing zeros kept ⇒ `v = int(digits) / 10^n_dec` | [Excellon] |
@@ -274,7 +275,9 @@ The unknown transform maps drawing points `x` to board points `y`:
 
    `S` forces a proper rotation, so a reflection is only ever introduced through `M`. Re-match → re-fit until the correspondence set is stable.
 4. **Ambiguity.** Refined hypotheses that tie on inlier count and RMS are clustered (two transforms are the same if they move every point of the board-sized square by less than `tol`). More than one cluster means the reference pattern is symmetric, e.g. four holes in a rectangle. pcbsim reports NG and asks for an asymmetric reference hole or an `anchors` entry instead of guessing.
-5. **Outline ICP** [Besl-McKay-1992]. Drawing outline samples (even spacing plus every vertex) are projected onto the exact nearest point of the board outline segments. Hole pairs and outline samples are refitted jointly with step 3 (outline weight 0.2 per hole-equivalent) until the update moves no point by more than 1e-12 m. Feature RMS, maximum residual, and outline RMS before and after ICP are reported.
+5. **Outline ICP** [Besl-McKay-1992]. Drawing outline samples (even spacing plus every vertex) are projected onto the exact nearest point of the board outline segments. Hole pairs and outline samples are refitted jointly with step 3 (outline weight 0.2 per hole-equivalent) until the update moves no point by more than 1e-12 m. The ICP result is accepted only if it improves the outline RMS by more than 1 %, loses no hole match, and keeps the hole RMS within max(2×, tol/10). Otherwise the hole-only transform is kept, so a wrong drawing outline (the very thing the outline check must report) cannot drag the fit. Feature RMS, maximum residual, and outline RMS before and after ICP are reported.
+
+Transforms are compared on a square around the drawing's features, not around the file origin, so a board placed far from (0, 0) does not inflate rotation differences. Anchors are enforced after refinement.
 
 With exact data the true transform is a fixed point of every step, which is what the 1e-6 mm recovery tests rely on.
 
@@ -288,8 +291,8 @@ With exact data the true transform is a fixed point of every step, which is what
 | outline | symmetric Hausdorff `d_H(A,B) = max(sup_a d(a,B), sup_b d(b,A))` of the exterior rings (densified to 5 % of each segment) | 0.2 mm |
 | cutouts | interior rings paired by centroid, Hausdorff per pair; unpaired = NG | 0.2 mm |
 | component position | body footprint centroid vs. placement point (X3 `ComponentMain`, `TO.C` pad centroid, or PnP CSV) | 0.5 mm |
-| component rotation | orientation of the minimum rotated rectangle vs. placement rotation, modulo 90° (a box cannot tell 0° from 90°) | 2° |
-| height | clearance = ceiling − z_top; ceiling = min(case height, keepout limit over the footprint, underside of case items above it) | ≥ 0.5 mm |
+| component rotation | orientation of the minimum rotated rectangle vs. placement rotation, modulo 90° (a box cannot tell 0° from 90°); skipped for square/round bodies (aspect ≤ 1.05) | 2° |
+| height | clearance = ceiling − z_top; ceiling = min(case height, keepout limit over the footprint, underside of case items above it), using only items on the same board side (a mirrored drawing shows the bottom side) | ≥ 0.5 mm |
 
 ### 8.4 Thermal boundary conditions from the mechanical model
 
