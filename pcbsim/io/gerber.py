@@ -31,7 +31,8 @@ Plotting (§4.7, §4.8)
     start == end means a full circle; in single-quadrant mode (``G74``) I, J
     are unsigned and the centre is the candidate (±I, ±J) whose arc is ≤ 90°
     in the requested direction. Arcs are flattened with sagitta ≤ 1 µm
-    (``n = ceil(θ / (2·acos(1 − s/r)))``, at least 16 per full turn).
+    (``n = ceil(θ / (2·acos(1 − s/r)))``, at least 64 per full turn, so the
+    inscribed-polygon area error is ≤ 0.16 %).
 
 Regions (§4.10)
     Between ``G36`` and ``G37`` every D01 sequence is a contour; ``D02`` closes
@@ -71,6 +72,7 @@ from pcbsim.io.cad import Flash, GerberLayer, PlacedComponent
 from pcbsim.units import INCH, MM
 
 SAGITTA = 1e-6
+MIN_SEGMENTS = 64
 GERBER_SUFFIXES = {
     ".gbr", ".ger", ".gtl", ".gbl", ".gto", ".gbo", ".gts", ".gbs", ".gtp", ".gbp",
     ".gm1", ".gko", ".gml", ".gbx", ".art", ".pho",
@@ -186,7 +188,7 @@ def _n_seg(radius: float, sweep: float) -> int:
         return 4
     step = 2.0 * math.acos(max(1.0 - SAGITTA / radius, -1.0))
     n = math.ceil(abs(sweep) / step) if step > 0 else 720
-    return max(min(n, 720), math.ceil(16 * abs(sweep) / (2 * math.pi)), 1)
+    return max(min(n, 720), math.ceil(MIN_SEGMENTS * abs(sweep) / (2 * math.pi)), 1)
 
 
 def _circle(cx: float, cy: float, d: float) -> Polygon:

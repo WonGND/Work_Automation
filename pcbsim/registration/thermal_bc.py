@@ -41,6 +41,7 @@ Case air gap
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -183,7 +184,7 @@ def derive_boundaries(
     comps: list[PlacedComponent],
     lmap: LayerMap,
     outline: Polygon | None,
-    comp_footprints: dict[str, BaseGeometry] | None = None,
+    comp_footprints: Mapping[str, BaseGeometry] | None = None,
 ) -> tuple[list[MechBoundary], list[str]]:
     """Heat sinks, chassis contacts and case gaps → thermal boundaries (board frame)."""
     out: list[MechBoundary] = []
