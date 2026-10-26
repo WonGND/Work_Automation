@@ -74,7 +74,10 @@ def test_similarity_dict_roundtrip() -> None:
 
 def test_apply_angle_mirror() -> None:
     t = Similarity2D(math.radians(90), 0, 0, 1, True)
-    assert t.apply_angle(30.0) == pytest.approx(60.0)  # −30 + 90
+    assert t.apply_angle(30.0) == pytest.approx(240.0)  # (180 − 30) + 90
+    d = np.array([math.cos(math.radians(30.0)), math.sin(math.radians(30.0))])
+    v = t.apply([d])[0] - t.apply([(0.0, 0.0)])[0]
+    assert math.degrees(math.atan2(v[1], v[0])) % 360.0 == pytest.approx(240.0)
 
 
 @pytest.mark.parametrize("mirror", [False, True])

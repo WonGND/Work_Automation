@@ -53,8 +53,11 @@ class Similarity2D:
         return out
 
     def apply_angle(self, angle_deg: float) -> float:
-        """Map an in-plane orientation (degrees CCW) through the transform."""
-        a = -angle_deg if self.mirror else angle_deg
+        """Map an in-plane orientation (degrees CCW) through the transform.
+
+        ``M = diag(−1, 1)`` sends direction α to 180° − α, then ``R`` adds θ.
+        """
+        a = 180.0 - angle_deg if self.mirror else angle_deg
         return (a + math.degrees(self.angle)) % 360.0
 
     def apply_geometry(self, geom: BaseGeometry) -> BaseGeometry:
@@ -70,10 +73,19 @@ class Similarity2D:
         ang = self.angle if self.mirror else -self.angle
         return Similarity2D(ang, float(t[0]), float(t[1]), 1.0 / self.scale, self.mirror)
 
-    def distance_to(self, other: Similarity2D, extent: float) -> float:
-        """Max displacement between the two transforms over a square of half-size ``extent``."""
+    def distance_to(
+        self, other: Similarity2D, extent: float, center: tuple[float, float] = (0.0, 0.0)
+    ) -> float:
+        """Max displacement between the two transforms over the square of half-size
+        ``extent`` centred on ``center`` (source coordinates)."""
+        cx, cy = center
         corners = np.array(
-            [[-extent, -extent], [extent, -extent], [extent, extent], [-extent, extent]]
+            [
+                [cx - extent, cy - extent],
+                [cx + extent, cy - extent],
+                [cx + extent, cy + extent],
+                [cx - extent, cy + extent],
+            ]
         )
         return float(np.max(np.linalg.norm(self.apply(corners) - other.apply(corners), axis=1)))
 

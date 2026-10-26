@@ -69,7 +69,9 @@ def test_bottom_view_mirror_and_inch_units(tmp_path: Path) -> None:
     assert r.transform.scale == pytest.approx(25.4)
     assert r.unit_warning is not None
     assert "inch" in r.unit_warning
-    assert r.transform.distance_to(_expected(t, 25.4), 0.05) < TOL
+    # The DXF reader flattens arcs to 1 µm *in drawing units*; read as mm but really
+    # inch, that is 25.4 µm of outline chord error after rescaling, which ICP sees.
+    assert r.transform.distance_to(_expected(t, 25.4), 0.05) < 10 * TOL
     assert not _ng(m, "hole_position")
     assert not _ng(m, "component_position")
 

@@ -33,7 +33,8 @@ the correspondences in advance.
    separate, explicitly tested hypotheses. Re-match → re-fit until stable.
 4. **Ambiguity.** All refined hypotheses whose inlier count equals the best and
    whose RMS is within the noise level are clustered (two transforms are the
-   same if they move every point of the board's bounding square by < tol).
+   same if they move every corner of the square around the drawing's features
+   by < tol — centred there, not at the file origin).
    More than one cluster means the hole pattern is symmetric: the result is
    flagged ``ambiguous`` and the user must name an asymmetric reference hole
    (``anchors``) — pcbsim does not guess.
@@ -41,7 +42,11 @@ the correspondences in advance.
    projected exactly onto the ECAD outline segments (point-to-segment closest
    point); holes and outline samples are fitted jointly with weights by the
    same Umeyama step, iterated to convergence [Besl-McKay-1992]. With exact
-   data the true transform is a fixed point, so ICP never degrades it.
+   data the true transform is a fixed point. The ICP result is accepted only
+   if it keeps every hole match and the hole RMS stays within max(2×, tol/10);
+   otherwise a wrong drawing outline would pull the fit, so it is discarded.
+   Anchors are checked after refinement (a 2-point hypothesis may miss a
+   distant anchor by more than tol before refinement).
 
 Residuals reported: RMS and max of matched features, RMS of outline samples.
 """
@@ -50,7 +55,7 @@ from __future__ import annotations
 
 import itertools
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -368,10 +373,12 @@ def icp_refine(
 # --------------------------------------------------------------------------- driver
 
 
-def _cluster(cands: list[Similarity2D], tol: float, extent: float) -> list[Similarity2D]:
+def _cluster(
+    cands: list[Similarity2D], tol: float, dist: Callable[[Similarity2D, Similarity2D], float]
+) -> list[Similarity2D]:
     reps: list[Similarity2D] = []
     for c in cands:
-        if all(c.distance_to(r, extent) > tol for r in reps):
+        if all(dist(c, r) > tol for r in reps):
             reps.append(c)
     return reps
 
@@ -393,10 +400,18 @@ def register(
             f"board {len(dst)}); add mounting holes, fiducials or enable outline vertices"
         )
     dp = np.array([[f.x, f.y] for f in dst])
+    sp_all = np.array([[f.x, f.y] for f in src])
     tree = cKDTree(dp)
-    extent = float(np.ptp(dp, axis=0).max()) / 2.0 or 1.0
+    # Transforms are compared on a square around the drawing's features, so a
+    # board far from its file origin does not inflate rotation differences.
+    lo, hi = sp_all.min(axis=0), sp_all.max(axis=0)
+    center = (float(lo[0] + hi[0]) / 2.0, float(lo[1] + hi[1]) / 2.0)
+    extent = float(np.max(hi - lo)) / 2.0 or 1.0
 
-    hyps = [h for h in _hypotheses(src, dst, opts) if _anchor_ok(h, opts)]
+    def same(a: Similarity2D, b: Similarity2D) -> float:
+        return a.distance_to(b, extent, center)
+
+    hyps = _hypotheses(src, dst, opts)
     if not hyps:
         raise RegistrationError(
             "no transform hypothesis: no pair of drawing features matches a pair of board "
@@ -407,7 +422,7 @@ def register(
     scored: list[tuple[int, float, Similarity2D, list[tuple[int, int]], FloatArray]] = []
     seen: list[Similarity2D] = []
     for h in hyps:
-        if any(h.distance_to(s, extent) < opts.tol * 0.5 for s in seen):
+        if any(same(h, s) < opts.tol * 0.5 for s in seen):
             continue
         seen.append(h)
         t, pairs, res = _refit(h, src, dst, tree, opts)
@@ -415,13 +430,18 @@ def register(
             continue
         scored.append((len(pairs), float(np.sqrt((res**2).mean())), t, pairs, res))
     if not scored:
+        if opts.anchors:
+            raise RegistrationError(
+                "no transform satisfies the registration anchors within tol; check that each "
+                "anchor's drawing and board points really correspond"
+            )
         raise RegistrationError("no hypothesis reached 2 inliers")
     best_n = max(s[0] for s in scored)
     top = [s for s in scored if s[0] == best_n]
     top.sort(key=lambda s: s[1])
     noise = max(top[0][1] * 3.0, opts.tol * 0.25)
     equal = [s for s in top if s[1] <= noise]
-    reps = _cluster([s[2] for s in equal], opts.tol, extent)
+    reps = _cluster([s[2] for s in equal], opts.tol, same)
     _, rms, t, pairs, res = top[0]
 
     ambiguous = len(reps) > 1
@@ -447,9 +467,23 @@ def register(
         if opts.use_outline_icp and not ambiguous:
             sp = np.array([[src[i].x, src[i].y] for i, _ in pairs])
             dq = np.array([[dst[j].x, dst[j].y] for _, j in pairs])
-            t = icp_refine(t, sp, dq, src_outline, dst_outline, opts)
-            pairs, res = _match(t, src, dst, tree, opts)
-            rms = float(np.sqrt((res**2).mean())) if len(res) else math.nan
+            t_icp = icp_refine(t, sp, dq, src_outline, dst_outline, opts)
+            p_icp, r_icp = _match(t_icp, src, dst, tree, opts)
+            rms_icp = float(np.sqrt((r_icp**2).mean())) if len(r_icp) else math.inf
+            # The outline is what the checks are about to judge, so it must not drag
+            # the hole fit: keep ICP only if it loses no match and the hole RMS stays
+            # within max(2×, tol/10).
+            if (
+                len(p_icp) >= len(pairs)
+                and rms_icp <= max(2.0 * rms, opts.tol * 0.1)
+                and _anchor_ok(t_icp, opts)
+            ):
+                t, pairs, res, rms = t_icp, p_icp, r_icp, rms_icp
+            else:
+                warnings.append(
+                    "outline ICP rejected: it degraded the hole fit (the drawing outline "
+                    "probably differs from the board); transform from holes only"
+                )
         o_rms = outline_rms(t, src_outline, dst_outline, opts.outline_samples)
 
     return RegistrationResult(
