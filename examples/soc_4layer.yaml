@@ -135,3 +135,4 @@ analysis:
       ambient: 25
       h_top: 10
       h_bottom: 5
+    coupled: { tol_t: 0.01, tol_v: 1.0e-5, max_iter: 50 }   # ρ(T) ⇄ Joule heat, theory §5

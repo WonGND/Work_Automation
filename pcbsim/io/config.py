@@ -334,6 +334,11 @@ class MeshSpec(_Model):
     refine: Annotated[int, Field(ge=1)] = 1
 
 
+# Composite solvers run these solvers internally, so their options are accepted
+# even when only the composite is listed in ``analysis.solvers``.
+_DRIVES: dict[str, set[str]] = {"coupled": {"dc_ir", "thermal"}}
+
+
 class AnalysisSpec(_Model):
     solvers: list[str] = Field(default_factory=list)
     mesh: MeshSpec = Field(default_factory=MeshSpec)
@@ -344,7 +349,10 @@ class AnalysisSpec(_Model):
 
     @model_validator(mode="after")
     def _options_match(self) -> AnalysisSpec:
-        stray = set(self.options) - set(self.solvers)
+        allowed = set(self.solvers)
+        for name in self.solvers:
+            allowed |= _DRIVES.get(name, set())
+        stray = set(self.options) - allowed
         if stray:
             raise ValueError(f"options given for solvers not listed in 'solvers': {sorted(stray)}")
         return self

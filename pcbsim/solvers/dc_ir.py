@@ -206,6 +206,17 @@ class DcIrSolver(Solver):
         self._require_phase("solved")
         return _postprocess(self, self.system, self.v_node)
 
+    def resolve(self, temperature_field: FloatArray) -> None:
+        """Re-assemble with a new per-cell temperature field [K] and solve again.
+
+        Used by the ``coupled`` solver. The grid, ports and topology are unchanged;
+        only ρ(T) of every cell and via changes.
+        """
+        self._require_phase("solved")
+        self.opts = self.opts.model_copy(update={"temperature_field": temperature_field})
+        self.system = _assemble(self, self.system.grid)
+        self.v_node = _solve(self.system, self.opts)
+
 
 def _temperature_cells(solver: DcIrSolver, grid: Grid) -> FloatArray | None:
     o = solver.opts

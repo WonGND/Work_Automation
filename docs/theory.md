@@ -111,7 +111,7 @@ These follow the "sink voltage vs expected value / pass-fail" and "path resistan
 
 ### 3.5 Temperature dependence
 
-Per cell, ρ(T) = ρ₀ [1 + α (T − T_ref)] (§2.1), from a uniform `temperature` option (°C) or a `temperature_field` array (K) that the stage-4 coupled solver will supply.
+Per cell, ρ(T) = ρ₀ [1 + α (T − T_ref)] (§2.1), from a uniform `temperature` option (°C) or a `temperature_field` array (K) supplied by the coupled solver (§5).
 
 ### 3.6 Post-processing
 
@@ -210,16 +210,40 @@ This scheme is unconditionally stable and first-order accurate in Δt. C is the 
 * Lumped-capacitance transient T(t) = T_∞ + P/G (1 − e^(−t/τ)), τ = C/G [Incropera §5.2]: backward-Euler error shrinks with Δt.
 * Global energy balance: Σ heat out = P_in in steady state, to round-off.
 
-## 5. Electro-thermal coupling *(stage 4)*
+## 5. Electro-thermal coupling (stage 4) — `pcbsim/solvers/coupled.py`
 
-Picard iteration:
+### 5.1 Model
 
-1. Solve DC IR with σ(T_k).
-2. Joule heating density q = J²/σ = σ |∇V|² → heat source in each layer.
-3. Solve thermal → T_{k+1}.
-4. Stop when max|ΔT| < tol_T and max|ΔV| < tol_V.
+Copper resistivity follows the linear model of §2.1, ρ(T) = ρ₀ [1 + α (T − T_ref)], cell by cell (§3.5); a via uses the mean temperature of the two cells it joins. The conduction loss q = J²ρ = σ |∇V|² is the Joule power P = Σ G ΔV² of §3.6, split over the two half-cells of each link and injected into the thermal sheet of the same cell (§4.5). Both solvers share one grid, so no interpolation is needed.
 
-With α = 0, ρ(T) = ρ₀ and the result must equal the uncoupled solution (regression test).
+### 5.2 Picard (fixed-point) iteration
+
+```
+k = 0:  V⁰ = dc_ir(user options)          T⁰ = thermal(P(V⁰))          (= the uncoupled run)
+k ≥ 1:  Vᵏ = dc_ir(ρ(T̃ᵏ⁻¹))               T* = thermal(P(Vᵏ))
+        T̃ᵏ = T̃ᵏ⁻¹ + ω (T* − T̃ᵏ⁻¹),   0 < ω ≤ 1,   T̃⁰ = T⁰
+stop:   max|T* − T̃ᵏ⁻¹| < tol_T  and  max|Vᵏ − Vᵏ⁻¹| < tol_V
+```
+
+Only the right-hand side of the thermal system changes between passes, so the sparse LU of §4.2 is computed once and reused, and each thermal solve is warm-started from the previous temperature. The DC system is re-assembled each pass because every link conductance changes.
+
+### 5.3 Convergence and thermal runaway
+
+Lumped model: a conductor R(T) = R₀[1 + α(T − T_ref)] carries a fixed current I and is connected to ambient T_a through R_th. One pass is the map Tᵏ⁺¹ = T_a + K[1 + α(Tᵏ − T_ref)] with K = R_th I² R₀. It is a contraction with ratio κ = αK (Banach fixed-point theorem [Kelley-1995, ch. 4]) and converges to
+
+T* = T_a + K [1 + α (T_a − T_ref)] / (1 − αK).
+
+When αK ≥ 1 no physical fixed point exists: each pass adds more heat than the last (thermal runaway). Under-relaxation changes the ratio to 1 − ω(1 − κ). That damps the oscillation of a voltage-driven load, where κ is effectively negative, but cannot rescue a runaway. The solver reports κ ≈ ΔTₖ/ΔTₖ₋₁ as the scalar `contraction`. It stops with a `thermal_runaway` violation when ΔT has grown for three consecutive passes, and with a `convergence` violation when `max_iter` passes are used up.
+
+A PDN driven by a current sink fixes I, so κ > 0 and the iteration converges monotonically. On the example board κ ≈ 0.002, and two passes reach ΔT < 0.01 K.
+
+### 5.4 Verification (`tests/test_coupled.py`)
+
+* Isothermal sheet (k → ∞) with convection on both faces: T, R_path, and P match the lumped fixed point above to 1e-3 K and 1e-6 relative error. The measured contraction ratio matches αK to 1 %.
+* With α = 0 the coupled result equals the uncoupled `dc_ir` + `thermal` result (V to 1e-12 V, T to 1e-6 K) after one pass.
+* On the example board the coupled IR drop is higher than the uncoupled one, and higher again with a hotter ambient.
+* The converged fields are self-consistent: an independent `dc_ir` run with the final T, followed by `thermal` with its Joule field, reproduces them.
+* Relaxation ω = 0.5 reaches the same fixed point in more passes; αK > 1 is reported as runaway.
 
 ---
 
@@ -425,3 +449,4 @@ Electrical geometry (copper, pads, vias) always comes from the ECAD side. The me
 * **[Umeyama-1991]** S. Umeyama, "Least-squares estimation of transformation parameters between two point patterns," *IEEE TPAMI* 13(4), 1991.
 * **[Kabsch-1976]** W. Kabsch, "A solution for the best rotation to relate two sets of vectors," *Acta Cryst.* A32, 1976.
 * **[Besl-McKay-1992]** P. J. Besl, N. D. McKay, "A method for registration of 3-D shapes," *IEEE TPAMI* 14(2), 1992.
+* **[Kelley-1995]** C. T. Kelley, *Iterative Methods for Linear and Nonlinear Equations*, SIAM, 1995, ch. 4 (fixed-point iteration, contraction).

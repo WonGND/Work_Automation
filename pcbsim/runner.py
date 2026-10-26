@@ -4,8 +4,9 @@ Solvers run in the order listed in ``analysis.solvers``, except that a solver
 is moved after any requested solver it declares in ``Solver.uses`` (e.g.
 ``thermal`` after ``dc_ir`` for Joule heating). Each receives the
 shared mesh and the results of the solvers that ran before it
-(``SolverContext.upstream``), which is how ``coupled`` will reuse ``dc_ir`` and
-``thermal``.
+(``SolverContext.upstream``) and the options of every solver
+(``SolverContext.options``), which ``coupled`` uses to drive ``dc_ir`` and
+``thermal`` with the user's settings.
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ def run_analysis(cfg: LoadedConfig, solvers: list[str] | None = None) -> RunResu
     grid = build_grid(cfg.board, mesh.cell / mesh.refine)
     out = RunResult(cfg, grid)
     for name, cls in zip(names, classes, strict=True):
-        ctx = SolverContext(cfg.board, cfg.materials, grid, dict(out.results))
+        ctx = SolverContext(cfg.board, cfg.materials, grid, dict(out.results), cfg.analysis.options)
         solver = cls(cfg.analysis.options.get(name, {}))
         out.results[name] = solver.run(ctx)
     return out
@@ -141,10 +142,23 @@ def write_results(run: RunResult, out_dir: Path, plots: bool = True) -> list[Pat
             np.savez_compressed(npz, **arrays)  # type: ignore[arg-type]
             written.append(npz)
     if plots:
+        from pcbsim.post.convergence import plot_convergence
         from pcbsim.post.heatmap import plot_fields
 
         for rs in run.results.values():
             written += plot_fields(rs, run.config.board, out_dir)
+            hist = rs.meta.get("history") or {}
+            if "delta_t" in hist and "iteration" in hist:
+                tol = rs.meta.get("tolerances", {})
+                written.append(
+                    plot_convergence(
+                        hist,
+                        out_dir / f"{rs.solver}_convergence.png",
+                        tol.get("tol_t"),
+                        tol.get("tol_v"),
+                        f"{rs.solver}: electro-thermal iteration",
+                    )
+                )
     return written
 
 

@@ -201,7 +201,9 @@ class ThermalSystem:
     face_labels: list[str]
     p_components: float
     p_joule: float
+    power_fixed: FloatArray
     warnings: list[str] = field(default_factory=list)
+    lu: _Factor | None = None
 
 
 @register("thermal")
@@ -244,6 +246,18 @@ class ThermalSolver(Solver):
     def results(self) -> ResultSet:
         self._require_phase("solved")
         return _postprocess(self)
+
+    def resolve(self, joule: FloatArray) -> None:
+        """Steady re-solve with a new Joule field, warm-started from the last solution.
+
+        Used by the ``coupled`` solver; the system matrix and its factorisation
+        are reused because only the heat source changes.
+        """
+        self._require_phase("solved")
+        if self.opts.mode != "steady":
+            raise SolverError("thermal: resolve() supports steady state only")
+        set_joule(self.system, joule)
+        self.t_node, self.iterations = _solve_steady(self.system, self.opts, t0=self.t_node)
 
 
 def _fill_material(solver: ThermalSolver, li_stack: int) -> Material:
@@ -511,16 +525,13 @@ def _assemble(solver: ThermalSolver, grid: Grid) -> ThermalSystem:
     t_amb_static = t_amb_static[:n_nodes]
     power = power[:n_nodes]
 
+    power_fixed = power.copy()
     p_joule = 0.0
     joule = _joule_field(solver, grid)
     if joule is not None:
-        jl = np.where(inside[None, :, :], joule, 0.0)
-        lost = float(np.sum(joule) - np.sum(jl))
+        power, p_joule, lost = _with_joule(power_fixed, nid, grid, joule)
         if lost > 1e-12 * max(float(np.sum(joule)), 1.0):
             warnings.append(f"{lost:.3g} W of Joule heat lies outside the board outline")
-        in3 = np.broadcast_to(inside, jl.shape)
-        np.add.at(power, nid[in3], jl[in3])
-        p_joule = float(np.sum(jl))
 
     k = sp.coo_matrix(
         (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
@@ -549,10 +560,36 @@ def _assemble(solver: ThermalSolver, grid: Grid) -> ThermalSystem:
         face_labels=face_labels,
         p_components=p_comp,
         p_joule=p_joule,
+        power_fixed=power_fixed,
         warnings=warnings,
     )
     _check_grounded(sysm)
     return sysm
+
+
+def _with_joule(
+    power_fixed: FloatArray, nid: NDArray[np.int64], grid: Grid, joule: FloatArray
+) -> tuple[FloatArray, float, float]:
+    """Node power vector with a per-cell Joule field added; also (P_joule, P_outside)."""
+    inside = grid.inside
+    jl = np.where(inside[None, :, :], joule, 0.0)
+    lost = float(np.sum(joule) - np.sum(jl))
+    in3 = np.broadcast_to(inside, jl.shape)
+    power = power_fixed.copy()
+    np.add.at(power, nid[in3], jl[in3])
+    return power, float(np.sum(jl)), lost
+
+
+def set_joule(s: ThermalSystem, joule: FloatArray) -> None:
+    """Replace the Joule heat source of an assembled system (used by ``coupled``).
+
+    Only the right-hand side changes, so a cached factorisation stays valid.
+    """
+    shape = (len(s.grid.layers), s.grid.ny, s.grid.nx)
+    arr = np.asarray(joule, dtype=np.float64)
+    if arr.shape != shape:
+        raise SolverError(f"thermal: joule field shape {arr.shape} != grid shape {shape}")
+    s.power, s.p_joule, _ = _with_joule(s.power_fixed, s.nid, s.grid, arr)
 
 
 def _joule_field(solver: ThermalSolver, grid: Grid) -> FloatArray | None:
@@ -691,23 +728,31 @@ def _face_flux(f: _Face, tn: FloatArray) -> tuple[FloatArray, FloatArray]:
 
 
 def _solve_steady(
-    s: ThermalSystem, o: ThermalOptions, scale: float = 1.0
+    s: ThermalSystem, o: ThermalOptions, scale: float = 1.0, t0: FloatArray | None = None
 ) -> tuple[FloatArray, int]:
     """Linear solve; with radiation, Newton iteration on the exact face law.
 
-    The start value is the linear solve with h_rad evaluated at ambient. Newton
-    only changes the matrix diagonal, so every step reuses the first sparse LU
-    as a CG preconditioner (see :class:`_Factor`).
+    The start value is the linear solve with h_rad evaluated at ambient, or
+    ``t0`` (warm start, used by the coupled solver). Newton only changes the
+    matrix diagonal, so every step reuses the sparse LU of the ambient-h_rad
+    matrix as a CG preconditioner (see :class:`_Factor`). That LU is cached on
+    the system, so repeated solves with a new power vector skip the factorisation.
     """
     k, rhs_amb, _ = _system_matrix(s, None)
     kff, r, f_idx, d_idx, d_val = _apply_dirichlet(k, rhs_amb + scale * s.power, s)
-    factor = _Factor(kff)
+    if s.lu is None:
+        s.lu = _Factor(kff)
+    factor = s.lu
     t = np.empty(s.n_nodes)
     t[d_idx] = d_val
-    t[f_idx] = factor.solve(kff, r, None, True)
+    radiating = _radiating(s)
+    if t0 is not None and radiating:
+        t[f_idx] = t0[f_idx]
+    else:
+        t[f_idx] = factor.solve(kff, r, None, True)
     if not np.all(np.isfinite(t)):
         raise SolverError("thermal: linear solve produced non-finite temperatures")
-    if not _radiating(s):
+    if not radiating:
         return t, 1
     base = sp.csr_matrix(s.k_static + sp.diags(s.g_amb_static))
     src = s.g_amb_static * s.t_amb_static + scale * s.power

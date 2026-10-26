@@ -76,12 +76,18 @@ class ResultSet:
 
 @dataclass(frozen=True, slots=True)
 class SolverContext:
-    """Everything a solver may need. ``mesh`` and ``upstream`` are filled by the runner."""
+    """Everything a solver may need; ``mesh``, ``upstream`` and ``options`` come from the runner.
+
+    ``options`` holds the options of *every* solver in the analysis (keyed by
+    solver name), so a composite solver such as ``coupled`` can configure the
+    solvers it drives the same way the user configured them.
+    """
 
     board: Board
     materials: MaterialDB
     mesh: Any = None
     upstream: Mapping[str, ResultSet] = field(default_factory=dict)
+    options: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 class Solver(ABC):
@@ -143,7 +149,12 @@ S = TypeVar("S", bound=type[Solver])
 
 _REGISTRY: dict[str, type[Solver]] = {}
 _ENTRY_POINTS_LOADED = False
-_BUILTINS = ("pcbsim.solvers.dc_ir", "pcbsim.solvers.thermal", "pcbsim.solvers.si")
+_BUILTINS = (
+    "pcbsim.solvers.dc_ir",
+    "pcbsim.solvers.thermal",
+    "pcbsim.solvers.coupled",
+    "pcbsim.solvers.si",
+)
 
 
 def _load_entry_points() -> None:

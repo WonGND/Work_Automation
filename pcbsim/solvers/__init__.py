@@ -1,7 +1,7 @@
 """Physics solvers (plugin architecture — see :mod:`pcbsim.solvers.base`).
 
-Planned built-ins: ``dc_ir`` (stage 2), ``thermal`` (3), ``coupled`` (4), ``si`` (5),
-``em_openems`` (8, optional).
+Built-ins: ``dc_ir`` (stage 2), ``thermal`` (3), ``coupled`` (4), ``si`` (5).
+Planned: ``em_openems`` (8, optional).
 """
 
 from __future__ import annotations

@@ -302,6 +302,60 @@ def _print_thermal(rs: ResultSet, layers: Sequence[str], out: TextIO) -> None:
         )
 
 
+def _print_coupled(rs: ResultSet, layers: Sequence[str], out: TextIO) -> None:
+    hist = rs.meta["history"]
+    state = "converged" if rs.meta["converged"] else "NOT converged"
+    print(
+        f"  {state} after {rs.meta['iterations']} pass(es): "
+        f"ΔT {rs.scalars['delta_t']:.2g} K, ΔV {rs.scalars['delta_v']:.2g} V",
+        file=out,
+    )
+    rows = [
+        [
+            f"{int(k)}",
+            "-" if not math.isfinite(dt) else f"{dt:.3g}",
+            "-" if not math.isfinite(dv) else f"{dv * 1e3:.3g}",
+            _c(tm),
+            f"{pj * 1e3:.2f}",
+            f"{dp:.3f}",
+        ]
+        for k, dt, dv, tm, pj, dp in zip(
+            hist["iteration"],
+            hist["delta_t"],
+            hist["delta_v"],
+            hist["t_max"],
+            hist["joule_power"],
+            hist["drop_pct_max"],
+            strict=True,
+        )
+    ]
+    head = ["pass", "ΔT [K]", "ΔV [mV]", "T_max [°C]", "Joule [mW]", "worst drop [%]"]
+    print(_table(rows, head, {1, 2, 3, 4, 5}), file=out)
+    print("  coupled vs uncoupled (pass 0):", file=out)
+    for r in summarize_ports(rs.meta["ports"]):
+        before = rs.scalars.get(f"{r['name']}.drop_pct.uncoupled")
+        if before is not None:
+            print(
+                f"    {r['name']:12s} drop {before:.3f} % → {r['drop_pct']:.3f} %"
+                f"  ({'PASS' if r['passed'] else 'FAIL'})",
+                file=out,
+            )
+    for r in sorted(rs.meta["components"], key=lambda r: r["margin"]):
+        before = rs.scalars.get(f"{r['ref']}.tj.uncoupled")
+        if before is not None:
+            print(
+                f"    {r['ref']:12s} Tj {_c(before)} → {_c(r['tj'])} °C"
+                f"  ({'PASS' if r['passed'] else 'FAIL'})",
+                file=out,
+            )
+    print(
+        f"    T_max {_c(rs.scalars['t_max.uncoupled'])} → {_c(rs.scalars['t_max'])} °C, "
+        f"Joule {rs.scalars['joule_power.uncoupled'] * 1e3:.2f} → "
+        f"{rs.scalars['joule_power'] * 1e3:.2f} mW",
+        file=out,
+    )
+
+
 def _mech_gate(cfg: LoadedConfig, force: bool, out: TextIO) -> bool:
     """Print the linked match status; return False if the run must stop."""
     m = cfg.mechanical
@@ -371,6 +425,8 @@ def cmd_run(args: argparse.Namespace, out: TextIO) -> int:
                 print(f"  via I_max {rs.scalars['via.i_max']:.3f} A", file=out)
         elif name == "thermal":
             _print_thermal(rs, g.layers, out)
+        elif name == "coupled":
+            _print_coupled(rs, g.layers, out)
         elif name == "si":
             _print_si(rs, out)
         for v in rs.violations:
