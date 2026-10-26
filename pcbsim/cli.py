@@ -398,6 +398,12 @@ def cmd_match(args: argparse.Namespace, out: TextIO) -> int:
         return EXIT_USAGE
     lmap = load_layer_map(args.map)
     mech = [Path(p) for p in args.mech] + [Path(p) for p in (args.step or [])]
+    # A previous result must not survive a failed match: `pcbsim run` would trust it.
+    targets = [Path(args.json)] if args.json else []
+    if args.report:
+        targets.append(Path(args.report).with_suffix(".json"))
+    for stale in targets:
+        stale.unlink(missing_ok=True)
     m = run_match(
         Path(args.gerber) if args.gerber else None,
         [Path(p) for p in args.drill or []],

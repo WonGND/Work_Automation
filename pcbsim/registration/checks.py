@@ -23,7 +23,8 @@ Components
     a ``rot`` group it is compared directly; otherwise the orientation of the
     body's minimum rotated rectangle is compared modulo 90° (a rectangle cannot
     tell 0° from 90°/180°), which still catches any skew that is not a multiple
-    of 90°.
+    of 90°. Square or round bodies (aspect ≤ 1.05) have no measurable
+    orientation and are reported OK with no value.
 
 Heights
     The ceiling over a point is the minimum of: the default ``case_height``,
@@ -37,7 +38,7 @@ Heights
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
@@ -308,13 +309,25 @@ def check_outline(
 # --------------------------------------------------------------------------- components
 
 
-def body_orientation(geom: BaseGeometry) -> float:
-    """Orientation (degrees, [0, 90)) of the minimum rotated rectangle's first edge."""
+SQUARE_ASPECT = 1.05
+
+
+def body_orientation(geom: BaseGeometry) -> float | None:
+    """Orientation (degrees, [0, 90)) of the minimum rotated rectangle's first edge.
+
+    ``None`` when the footprint has no orientation of its own: a square or round
+    body (aspect ≤ 1.05, e.g. QFN, BGA, electrolytic can) whose minimum
+    rectangle may be found at any angle — and a circle drawn as a polygon wobbles
+    by ±180°/n.
+    """
     rect = geom.minimum_rotated_rectangle
     if not isinstance(rect, Polygon):
-        return 0.0
+        return None
     c = np.asarray(rect.exterior.coords)
-    v = c[1] - c[0]
+    v, w = c[1] - c[0], c[2] - c[1]
+    a, b = float(np.hypot(*v)), float(np.hypot(*w))
+    if min(a, b) <= 0 or max(a, b) / min(a, b) <= SQUARE_ASPECT:
+        return None
     return math.degrees(math.atan2(float(v[1]), float(v[0]))) % 90.0
 
 
@@ -329,16 +342,20 @@ def assign_refs(
     """Fill ``ref`` of component bodies without one from the nearest ECAD placement."""
     taken = {b.ref for b in bodies if b.ref}
     free = [c for c in comps if c.ref not in taken]
+
+    def candidates(b: MechBody) -> list[PlacedComponent]:
+        return [c for c in free if c.side == b.side]
+
     out: list[MechBody] = []
     for b in bodies:
         if b.role != "comp_3d" or b.ref:
             out.append(b)
             continue
         cen = b.geometry.centroid
-        best = min(free, key=lambda c: math.dist((c.x, c.y), (cen.x, cen.y)), default=None)
+        best = min(candidates(b), key=lambda c: math.dist((c.x, c.y), (cen.x, cen.y)), default=None)
         if best is not None and math.dist((best.x, best.y), (cen.x, cen.y)) <= radius:
             free.remove(best)
-            b = MechBody(b.layer, b.role, b.geometry, b.z_base, b.z_top, best.ref, b.limit)
+            b = replace(b, ref=best.ref)
         out.append(b)
     return out
 
@@ -393,7 +410,22 @@ def check_components(
             dr = _angle_diff(rotations[b.ref], c.rotation, 360.0)
             msg = "rotation from drawing layer name"
         else:
-            dr = _angle_diff(body_orientation(b.geometry), c.rotation % 90.0, 90.0)
+            orient = body_orientation(b.geometry)
+            if orient is None:
+                out.append(
+                    CheckItem(
+                        "component_rotation",
+                        b.ref,
+                        Status.OK,
+                        None,
+                        opts.component_rotation_tol,
+                        unit="deg",
+                        message="square/round body: rotation not checkable from its outline",
+                        location=(c.x, c.y),
+                    )
+                )
+                continue
+            dr = _angle_diff(orient, c.rotation % 90.0, 90.0)
             msg = "body outline orientation, compared modulo 90°"
         out.append(
             CheckItem(
@@ -413,9 +445,14 @@ def check_components(
 # --------------------------------------------------------------------------- heights
 
 
-def ceiling_for(geom: BaseGeometry, bodies: list[MechBody], opts: CheckOptions) -> float:
+def ceiling_for(
+    geom: BaseGeometry, bodies: list[MechBody], opts: CheckOptions, side: str = "top"
+) -> float:
+    """Lowest ceiling over ``geom`` from keepouts and case items on the same side."""
     ceil = opts.case_height if opts.case_height is not None else math.inf
     for k in bodies:
+        if k.side != side:
+            continue
         if k.role == "keepout" and k.limit is not None and k.geometry.intersects(geom):
             if k.geometry.intersection(geom).area > 0 or geom.area == 0:
                 ceil = min(ceil, k.limit)
@@ -430,8 +467,10 @@ def check_heights(
     out: list[CheckItem] = []
     with_body: set[str] = set()
 
-    def one(name: str, geom: BaseGeometry, z_top: float, cat: str) -> None:
-        ceil = ceiling_for(geom, bodies, opts)
+    drawing_sides = {b.side for b in bodies}
+
+    def one(name: str, geom: BaseGeometry, z_top: float, cat: str, side: str) -> None:
+        ceil = ceiling_for(geom, bodies, opts, side)
         if not math.isfinite(ceil):
             return
         clr = ceil - z_top
@@ -452,12 +491,18 @@ def check_heights(
         if b.role == "comp_3d":
             if b.ref:
                 with_body.add(b.ref)
-            one(b.ref or b.layer, b.geometry, b.z_top, "height")
+            one(b.ref or b.layer, b.geometry, b.z_top, "height", b.side)
         elif b.role == "heatsink":
-            one(f"heatsink {b.layer}", b.geometry, b.z_top, "height")
+            one(f"heatsink {b.layer}", b.geometry, b.z_top, "height", b.side)
     for c in comps:
-        if c.height is not None and c.ref not in with_body:
-            one(f"{c.ref} (ECAD height)", Point(c.x, c.y).buffer(1e-4), c.height, "height")
+        # The drawing only constrains the side it shows; with no drawing items at all
+        # (case_height alone) every side is checked.
+        if c.height is None or c.ref in with_body:
+            continue
+        if drawing_sides and c.side not in drawing_sides:
+            continue
+        pt = Point(c.x, c.y).buffer(1e-4)
+        one(f"{c.ref} (ECAD height)", pt, c.height, "height", c.side)
     return out
 
 

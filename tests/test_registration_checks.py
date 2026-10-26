@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import pytest
-from shapely.geometry import Polygon, box
+from shapely.geometry import Point, Polygon, box
 
 from pcbsim.io.cad import Hole, PlacedComponent
 from pcbsim.registration.checks import (
@@ -196,6 +197,30 @@ def test_assign_refs_by_proximity() -> None:
 
 def test_body_orientation() -> None:
     assert body_orientation(_rot_box(0, 0, 4, 2, 33.0)) == pytest.approx(33.0, abs=1e-6)
+    assert body_orientation(_rot_box(0, 0, 4, 4, 33.0)) is None
+    assert body_orientation(Point(0, 0).buffer(1.0, quad_segs=16)) is None
+
+
+def test_square_body_rotation_not_flagged() -> None:
+    sq = MechBody("COMP_U1", "comp_3d", _rot_box(45 * MM, 20 * MM, 6 * MM, 6 * MM, 3.0), 0, 0, "U1")
+    (rot,) = [i for i in check_components([sq], COMPS, OPTS) if i.category == "component_rotation"]
+    assert rot.status is Status.OK
+    assert rot.value is None
+
+
+def test_bottom_side_items_use_bottom_ceilings() -> None:
+    lid = MechBody("CASE", "case", box(0, 0, 60 * MM, 40 * MM), 3 * MM, 4 * MM, side="top")
+    bot = PlacedComponent("C9", 30 * MM, 20 * MM, side="bottom", height=5 * MM)
+    top_body = MechBody(
+        "COMP_X", "comp_3d", box(29 * MM, 19 * MM, 31 * MM, 21 * MM), 0, 1 * MM, "X"
+    )
+    items = check_heights([lid, top_body], [bot], CheckOptions(min_clearance=0.5))
+    assert not [i for i in items if "C9" in i.subject]
+
+
+def test_assign_refs_respects_side() -> None:
+    b = replace(_body(None, 45 * MM, 20 * MM, 0.0), side="bottom")
+    assert assign_refs([b], COMPS, 3 * MM)[0].ref is None
 
 
 # --------------------------------------------------------------------------- heights

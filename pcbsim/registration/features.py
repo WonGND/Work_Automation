@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -70,6 +70,7 @@ class MechBody:
     ref: str | None = None
     limit: float | None = None  # keepout ceiling (m above the board)
     limit_from_drawing: bool = False  # True: limit is drawing geometry → follows the scale
+    side: str = "top"  # board side the item sits on (bottom for a bottom-view drawing)
 
 
 @dataclass(slots=True)
@@ -271,7 +272,7 @@ def extract_mech(drawing: MechDrawing, lmap: LayerMap) -> MechFeatures:
             break
     if ml.comp_3d is not None:
         for b in drawing.boxes:
-            if fullmatch(ml.comp_3d, b.name) or b.name.startswith("solid_"):
+            if fullmatch(ml.comp_3d, b.name):
                 bodies.append(
                     MechBody(
                         b.name,
@@ -315,16 +316,16 @@ def registration_options(lmap: LayerMap) -> RegistrationOptions:
 
 
 def transform_body(t: Similarity2D, b: MechBody) -> MechBody:
+    """Map a body into the board frame. A mirrored (bottom-view) drawing shows the
+    bottom side, so its z (measured away from the board) belongs to that side."""
     s = t.scale
-    return MechBody(
-        b.layer,
-        b.role,
-        t.apply_geometry(b.geometry),
-        b.z_base * s,
-        b.z_top * s,
-        b.ref,
-        b.limit * s if b.limit is not None and b.limit_from_drawing else b.limit,
-        b.limit_from_drawing,
+    return replace(
+        b,
+        geometry=t.apply_geometry(b.geometry),
+        z_base=b.z_base * s,
+        z_top=b.z_top * s,
+        limit=b.limit * s if b.limit is not None and b.limit_from_drawing else b.limit,
+        side="bottom" if t.mirror else "top",
     )
 
 

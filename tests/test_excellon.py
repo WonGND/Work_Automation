@@ -132,7 +132,10 @@ def test_leading_zero_tool_numbers() -> None:
 
 
 def test_tool_select_with_feed_and_speed() -> None:
-    text = "M48\nINCH,TZ\nT1C0.0400\nT2C0.1250\n%\nT1F200S65\nX10000Y10000\nT2F100S40\nX20000Y10000\nM30\n"
+    text = (
+        "M48\nINCH,TZ\nT1C0.0400\nT2C0.1250\n%\n"
+        "T1F200S65\nX10000Y10000\nT2F100S40\nX20000Y10000\nM30\n"
+    )
     holes = parse_excellon("x.drl", text=text).holes
     assert [h.diameter for h in holes] == pytest.approx([0.04 * 25.4e-3, 0.125 * 25.4e-3])
 

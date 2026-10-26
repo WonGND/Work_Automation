@@ -16,27 +16,27 @@
   },
   "registration": {
     "transform": {
-      "rotation_deg": -29.999999975769185,
+      "rotation_deg": -30.0,
       "translation_m": [
-        -0.14392304931246114,
-        -0.009282031217764976
+        -0.14392304845413267,
+        -0.009282032302755094
       ],
       "scale": 1.0,
       "mirror": false,
       "matrix": [
         [
-          0.8660254039958923,
-          0.4999999996337514
+          0.8660254037844386,
+          0.5
         ],
         [
-          -0.4999999996337514,
-          0.8660254039958923
+          -0.5,
+          0.8660254037844386
         ]
       ]
     },
-    "rms_m": 1.4490596132892054e-09,
-    "max_residual_m": 1.4624144526321542e-09,
-    "outline_rms_m": 3.781680883798105e-07,
+    "rms_m": 5.148798380004454e-17,
+    "max_residual_m": 6.370386689386132e-17,
+    "outline_rms_m": 3.7819731234497167e-07,
     "outline_rms_before_icp_m": 3.7819731234497167e-07,
     "matched": 5,
     "n_drawing_features": 5,
@@ -55,7 +55,7 @@
       "category": "registration",
       "subject": "feature RMS",
       "status": "OK",
-      "value": 1.4490596132892054e-06,
+      "value": 5.148798380004454e-14,
       "limit": 0.05,
       "unit": "mm",
       "message": "5 of 5 drawing features matched",
@@ -65,7 +65,7 @@
       "category": "registration",
       "subject": "outline RMS (after ICP)",
       "status": "OK",
-      "value": 0.0003781680883798105,
+      "value": 0.00037819731234497165,
       "limit": null,
       "unit": "mm",
       "message": "before ICP 0.0004 mm",
@@ -75,7 +75,7 @@
       "category": "hole_position",
       "subject": "hole @(3.50, 3.50) ⌀3.20",
       "status": "OK",
-      "value": 1.436111928574421e-06,
+      "value": 2.6992932749401028e-14,
       "limit": 0.1,
       "unit": "mm",
       "message": "",
@@ -99,35 +99,35 @@
     },
     {
       "category": "hole_position",
-      "subject": "hole @(3.50, 36.50) ⌀3.20",
+      "subject": "hole @(56.50, 3.50) ⌀3.20",
       "status": "OK",
-      "value": 1.4445486079429873e-06,
+      "value": 3.634908046050479e-14,
       "limit": 0.1,
       "unit": "mm",
       "message": "",
       "location": [
-        0.0035,
-        0.0365
+        0.0565,
+        0.0035
       ]
     },
     {
       "category": "hole_diameter",
-      "subject": "hole @(3.50, 36.50) ⌀3.20",
+      "subject": "hole @(56.50, 3.50) ⌀3.20",
       "status": "OK",
       "value": 0.0,
       "limit": 0.1,
       "unit": "mm",
       "message": "drawing ⌀3.200 mm vs drill ⌀3.200 mm",
       "location": [
-        0.0035,
-        0.0365
+        0.0565,
+        0.0035
       ]
     },
     {
       "category": "hole_position",
       "subject": "hole @(21.00, 27.00) ⌀2.00",
       "status": "OK",
-      "value": 1.4480061366669933e-06,
+      "value": 3.95577815330262e-14,
       "limit": 0.1,
       "unit": "mm",
       "message": "",
@@ -151,35 +151,9 @@
     },
     {
       "category": "hole_position",
-      "subject": "hole @(56.50, 3.50) ⌀3.20",
-      "status": "OK",
-      "value": 1.4540814553534094e-06,
-      "limit": 0.1,
-      "unit": "mm",
-      "message": "",
-      "location": [
-        0.0565,
-        0.0035
-      ]
-    },
-    {
-      "category": "hole_diameter",
-      "subject": "hole @(56.50, 3.50) ⌀3.20",
-      "status": "OK",
-      "value": 0.0,
-      "limit": 0.1,
-      "unit": "mm",
-      "message": "drawing ⌀3.200 mm vs drill ⌀3.200 mm",
-      "location": [
-        0.0565,
-        0.0035
-      ]
-    },
-    {
-      "category": "hole_position",
       "subject": "hole @(56.50, 36.50) ⌀3.20",
       "status": "OK",
-      "value": 1.4624144581824101e-06,
+      "value": 4.046035655711836e-14,
       "limit": 0.1,
       "unit": "mm",
       "message": "",
@@ -198,6 +172,32 @@
       "message": "drawing ⌀3.200 mm vs drill ⌀3.200 mm",
       "location": [
         0.0565,
+        0.0365
+      ]
+    },
+    {
+      "category": "hole_position",
+      "subject": "hole @(3.50, 36.50) ⌀3.20",
+      "status": "OK",
+      "value": 5.4279453211145936e-14,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.0035,
+        0.0365
+      ]
+    },
+    {
+      "category": "hole_diameter",
+      "subject": "hole @(3.50, 36.50) ⌀3.20",
+      "status": "OK",
+      "value": 0.0,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "drawing ⌀3.200 mm vs drill ⌀3.200 mm",
+      "location": [
+        0.0035,
         0.0365
       ]
     },
@@ -205,7 +205,7 @@
       "category": "outline",
       "subject": "board outline (Hausdorff)",
       "status": "OK",
-      "value": 0.0011499361560045136,
+      "value": 0.0011491967055726198,
       "limit": 0.2,
       "unit": "mm",
       "message": "",
@@ -215,7 +215,7 @@
       "category": "cutout",
       "subject": "cutout @(31.00, 34.00)",
       "status": "OK",
-      "value": 1.4536671774207543e-06,
+      "value": 4.1777673608052095e-14,
       "limit": 0.2,
       "unit": "mm",
       "message": "",
@@ -228,7 +228,7 @@
       "category": "component_position",
       "subject": "U1",
       "status": "OK",
-      "value": 1.4543388157752696e-06,
+      "value": 3.1031676915590914e-14,
       "limit": 0.5,
       "unit": "mm",
       "message": "",
@@ -241,10 +241,10 @@
       "category": "component_rotation",
       "subject": "U1",
       "status": "OK",
-      "value": 2.423082889890793e-08,
+      "value": null,
       "limit": 2.0,
       "unit": "deg",
-      "message": "body outline orientation, compared modulo 90°",
+      "message": "square/round body: rotation not checkable from its outline",
       "location": [
         0.045,
         0.02
@@ -254,7 +254,7 @@
       "category": "component_position",
       "subject": "U2",
       "status": "OK",
-      "value": 1.4428474453365544e-06,
+      "value": 4.5236053827798e-14,
       "limit": 0.5,
       "unit": "mm",
       "message": "",
@@ -267,10 +267,10 @@
       "category": "component_rotation",
       "subject": "U2",
       "status": "OK",
-      "value": 2.4230843109762645e-08,
+      "value": null,
       "limit": 2.0,
       "unit": "deg",
-      "message": "body outline orientation, compared modulo 90°",
+      "message": "square/round body: rotation not checkable from its outline",
       "location": [
         0.011,
         0.02
@@ -280,7 +280,7 @@
       "category": "component_position",
       "subject": "L1",
       "status": "OK",
-      "value": 1.4489053845118244e-06,
+      "value": 4.060883542877795e-14,
       "limit": 0.5,
       "unit": "mm",
       "message": "",
@@ -293,7 +293,7 @@
       "category": "component_rotation",
       "subject": "L1",
       "status": "OK",
-      "value": 2.423074363377964e-08,
+      "value": 1.3252311172764618e-13,
       "limit": 2.0,
       "unit": "deg",
       "message": "body outline orientation, compared modulo 90°",
@@ -306,7 +306,7 @@
       "category": "component_position",
       "subject": "U3",
       "status": "OK",
-      "value": 1.4432570353446616e-06,
+      "value": 3.4964469463373513e-14,
       "limit": 0.5,
       "unit": "mm",
       "message": "",
@@ -319,10 +319,10 @@
       "category": "component_rotation",
       "subject": "U3",
       "status": "OK",
-      "value": 2.4230658368651348e-08,
+      "value": null,
       "limit": 2.0,
       "unit": "deg",
-      "message": "body outline orientation, compared modulo 90°",
+      "message": "square/round body: rotation not checkable from its outline",
       "location": [
         0.022,
         0.007
@@ -337,8 +337,8 @@
       "unit": "mm",
       "message": "top 2.00 mm, ceiling 15.00 mm",
       "location": [
-        0.04499999912928793,
-        0.020000001164887073
+        0.04499999999999997,
+        0.019999999999999987
       ]
     },
     {
@@ -350,8 +350,8 @@
       "unit": "mm",
       "message": "top 1.50 mm, ceiling 15.00 mm",
       "location": [
-        0.010999999129287903,
-        0.020000001150508234
+        0.010999999999999954,
+        0.019999999999999997
       ]
     },
     {
@@ -363,8 +363,8 @@
       "unit": "mm",
       "message": "top 3.00 mm, ceiling 15.00 mm",
       "location": [
-        0.019499999124001577,
-        0.03250000115410293
+        0.019499999999999962,
+        0.03249999999999999
       ]
     },
     {
@@ -376,8 +376,8 @@
       "unit": "mm",
       "message": "top 1.00 mm, ceiling 2.00 mm",
       "location": [
-        0.02199999913478571,
-        0.007000001155160207
+        0.021999999999999964,
+        0.006999999999999996
       ]
     },
     {
@@ -389,8 +389,8 @@
       "unit": "mm",
       "message": "top 12.00 mm, ceiling 15.00 mm",
       "location": [
-        0.04499999912928791,
-        0.02000000116488708
+        0.04499999999999997,
+        0.019999999999999993
       ]
     }
   ],
@@ -413,20 +413,20 @@
       "side": "bottom",
       "polygon_m": [
         [
-          0.0009999991356315352,
-          0.005000001146279166
+          0.0009999999999999454,
+          0.0050000000000000044
         ],
         [
-          0.004999999135631539,
-          0.005000001147970785
+          0.004999999999999977,
+          0.0049999999999999906
         ],
         [
-          0.00499999913732313,
-          0.0010000011479707749
+          0.004999999999999949,
+          0.000999999999999994
         ],
         [
-          0.0009999991373231265,
-          0.0010000011462791489
+          0.0009999999999999454,
+          0.000999999999999987
         ]
       ],
       "component": null,
@@ -442,20 +442,20 @@
       "side": "bottom",
       "polygon_m": [
         [
-          0.054999999121252696,
-          0.03900000116911615
+          0.05499999999999999,
+          0.03899999999999999
         ],
         [
-          0.0589999991212527,
-          0.039000001170807784
+          0.059,
+          0.03899999999999998
         ],
         [
-          0.05899999912294435,
-          0.03500000117080777
+          0.059,
+          0.034999999999999976
         ],
         [
-          0.05499999912294429,
-          0.03500000116911615
+          0.05499999999999994,
+          0.034999999999999976
         ]
       ],
       "component": null,
