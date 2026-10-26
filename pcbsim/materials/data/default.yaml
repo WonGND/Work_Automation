@@ -1,0 +1,120 @@
+# pcbsim default material database.
+#
+# All values are SI:
+#   sigma        electrical conductivity        S/m      (at t_ref)
+#   alpha_r      temperature coeff. of resistivity  1/K   rho(T) = rho0 * (1 + alpha_r * (T - t_ref))
+#   t_ref        reference temperature           K
+#   eps_r        relative permittivity           -
+#   tan_d        dielectric loss tangent         -
+#   k_inplane    thermal conductivity (x, y)     W/(m K)
+#   k_through    thermal conductivity (z)        W/(m K)
+#   density      mass density                    kg/m^3
+#   cp           specific heat capacity          J/(kg K)
+#   emissivity   total hemispherical emissivity  -
+#
+# Every entry carries a `source` string; the full citations are in docs/theory.md.
+# Values are nominal room-temperature figures; override them per project via the
+# `materials:` section of a config file or an extra YAML file (`material_files:`).
+
+version: 1
+materials:
+  copper:
+    description: Annealed copper (100 % IACS)
+    sigma: 5.80e7
+    alpha_r: 0.00393
+    t_ref: 293.15
+    k_inplane: 398.0
+    k_through: 398.0
+    density: 8933.0
+    cp: 385.0
+    emissivity: 0.05
+    source: "IEC 60028 (100 % IACS, alpha_20); Incropera Table A.1 (k, rho, cp at 300 K)"
+
+  copper_ed:
+    description: Electrodeposited PCB copper foil / plating (IPC-4562 typical)
+    sigma: 5.75e7
+    alpha_r: 0.00393
+    t_ref: 293.15
+    k_inplane: 385.0
+    k_through: 385.0
+    density: 8933.0
+    cp: 385.0
+    emissivity: 0.05
+    source: "IPC-4562 (rho ~ 1.74e-8 Ohm m nominal); IEC 60028 alpha_20; Incropera Table A.1"
+
+  fr4:
+    description: Generic FR-4 glass/epoxy laminate (Tg ~ 140-170 C)
+    eps_r: 4.3
+    tan_d: 0.02
+    k_inplane: 0.81
+    k_through: 0.29
+    density: 1850.0
+    cp: 1100.0
+    emissivity: 0.9
+    source: "IPC-4101 /21 typical; Azar & Graebner, IEEE SEMI-THERM 1996 (anisotropic k)"
+
+  ro4350b:
+    description: Rogers RO4350B hydrocarbon/ceramic laminate
+    eps_r: 3.48
+    tan_d: 0.0037
+    k_inplane: 0.69
+    k_through: 0.69
+    density: 1860.0
+    cp: 920.0
+    emissivity: 0.9
+    source: "Rogers RO4000 series public data sheet (eps_r process value, tan_d @ 10 GHz)"
+
+  soldermask:
+    description: Liquid photoimageable (LPI) solder mask
+    eps_r: 3.8
+    tan_d: 0.025
+    k_inplane: 0.2
+    k_through: 0.2
+    density: 1500.0
+    cp: 1000.0
+    emissivity: 0.9
+    source: "IPC-SM-840 class T typical; emissivity per Incropera Table A.11 (paints/lacquers)"
+
+  air:
+    description: Dry air at 300 K, 1 atm
+    eps_r: 1.0006
+    tan_d: 0.0
+    k_inplane: 0.0263
+    k_through: 0.0263
+    density: 1.1614
+    cp: 1007.0
+    source: "Incropera Table A.4 (300 K)"
+
+  sac305:
+    description: Sn96.5Ag3.0Cu0.5 lead-free solder
+    sigma: 7.6e6
+    alpha_r: 0.0046
+    t_ref: 293.15
+    k_inplane: 58.0
+    k_through: 58.0
+    density: 7380.0
+    cp: 232.0
+    emissivity: 0.1
+    source: "NIST Solder Properties Database / NPL report DEPC-MPR 043 (nominal)"
+
+  via_fill_epoxy:
+    description: Non-conductive via plugging epoxy (IPC-4761 type VII)
+    sigma: 0.0
+    eps_r: 4.0
+    tan_d: 0.02
+    k_inplane: 0.6
+    k_through: 0.6
+    density: 1600.0
+    cp: 1000.0
+    source: "IPC-4761 (via protection types); k typical of non-conductive fill data sheets"
+
+  via_fill_conductive:
+    description: Silver-filled conductive via fill epoxy
+    sigma: 1.0e6
+    alpha_r: 0.0
+    t_ref: 293.15
+    k_inplane: 4.0
+    k_through: 4.0
+    density: 3500.0
+    cp: 500.0
+    source: "Order-of-magnitude typical of Ag-epoxy fill data sheets; override with vendor data"

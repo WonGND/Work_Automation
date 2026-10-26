@@ -1,0 +1,126 @@
+# pcbsim example — 60 × 40 mm, 4-layer board, 1.0 V core rail for an SoC.
+#
+#   * VRM (U2) on the left drives VDD_1V0 at 1.0 V.
+#   * SoC (U1) on the right sinks 6 A.
+#   * The L3 power plane has a slot between them, so current must detour
+#     around its upper end — a typical IR-drop bottleneck.
+#   * Total dissipation 5 W: SoC 4.0 W, VRM 0.6 W, inductor 0.25 W, LDO 0.15 W.
+#
+# Coordinates are in mm (units.length); origin at the lower-left board corner.
+# Same board as ../soc_4layer.yaml, but the heat sink, chassis standoffs and case
+# air gap come from the registered mechanical drawing (mech.dxf → match.json):
+#
+#   pcbsim match --gerber gerber --mech mech.dxf --map layers.yaml \
+#                --report report/match.html --json match.json
+#   pcbsim run soc_with_mech.yaml          # refuses if match.json is NG
+#   pcbsim run soc_with_mech.yaml --force  # simulate anyway
+
+version: 1
+name: soc_4layer_1v0_mech
+units:
+  length: mm
+
+materials:
+  fr4:
+    eps_r: 4.2
+
+board:
+  outline:
+    rect: [0, 0, 60, 40]
+  stackup:
+    - { name: SM_TOP, kind: soldermask, thickness: 20 um, material: soldermask }
+    - { name: L1_TOP, kind: conductor, thickness: 1 oz, material: copper_ed, role: mixed }
+    - { name: PP1, kind: dielectric, thickness: 0.2, material: fr4 }
+    - { name: L2_GND, kind: conductor, thickness: 1 oz, material: copper_ed, role: plane }
+    - { name: CORE, kind: dielectric, thickness: 1.02, material: fr4 }
+    - { name: L3_PWR, kind: conductor, thickness: 1 oz, material: copper_ed, role: plane }
+    - { name: PP2, kind: dielectric, thickness: 0.2, material: fr4 }
+    - { name: L4_BOT, kind: conductor, thickness: 1 oz, material: copper_ed, role: mixed }
+    - { name: SM_BOT, kind: soldermask, thickness: 20 um, material: soldermask }
+
+nets:
+  - { name: VDD_1V0, kind: power, voltage: 1.0 }
+  - { name: GND, kind: ground }
+
+shapes:
+  - { name: gnd_plane, net: GND, layer: L2_GND, fill: true }
+  - name: vdd_plane                     # 1.5 mm slot cut in from the bottom edge up to y = 30
+    net: VDD_1V0
+    layer: L3_PWR
+    polygon:
+      - [1, 1]
+      - [25, 1]
+      - [25, 30]
+      - [26.5, 30]
+      - [26.5, 1]
+      - [59, 1]
+      - [59, 39]
+      - [1, 39]
+  - { name: vrm_out_pad, net: VDD_1V0, layer: L1_TOP, rect: [8, 17, 14, 23] }
+  - { name: soc_vdd_pad, net: VDD_1V0, layer: L1_TOP, rect: [41, 16, 49, 24] }
+  - { name: bot_gnd_pour, net: GND, layer: L4_BOT, fill: true }
+
+vias:
+  - net: VDD_1V0                        # VRM output → power plane
+    from: L1_TOP
+    to: L3_PWR
+    drill: 0.3
+    array: { origin: [9, 18], pitch: [1, 1], count: [5, 5] }
+  - net: VDD_1V0                        # power plane → SoC core pad
+    from: L1_TOP
+    to: L3_PWR
+    drill: 0.3
+    array: { origin: [42, 17], pitch: [1.5, 1.5], count: [5, 5] }
+  - net: GND                            # thermal vias beside the SoC core pad
+    drill: 0.3
+    filled: true
+    filler: via_fill_epoxy
+    array: { origin: [39.5, 14], pitch: [11, 2], count: [2, 7] }
+  - net: GND                            # corner stitching
+    drill: 0.4
+    array: { origin: [3, 3], pitch: [54, 34], count: [2, 2] }
+
+components:
+  - { ref: U1, rect: [38, 13, 52, 27], power: 4.0 W, tj_max: 105, theta_jc: 0.5, theta_jb: 3.0 }
+  - { ref: U2, rect: [6, 15, 16, 25], power: 0.6 W, tj_max: 125, theta_jc: 2.0, theta_jb: 8.0 }
+  - { ref: L1, rect: [17, 30, 22, 35], power: 0.25 W, tj_max: 125 }
+  - { ref: U3, rect: [20, 5, 24, 9], power: 0.15 W }
+
+ports:
+  - name: VRM_OUT
+    kind: voltage_source
+    net: VDD_1V0
+    layer: L1_TOP
+    reference_net: GND
+    rect: [8, 17, 14, 23]
+    voltage: 1.0 V
+  - name: SOC_CORE
+    kind: current_sink
+    net: VDD_1V0
+    layer: L1_TOP
+    reference_net: GND
+    rect: [41, 16, 49, 24]
+    current: 6 A
+
+criteria:
+  ir_drop_pct: 3.0
+  tj_max_default: 105
+  current_density: ipc2152
+  current_density_temp_rise: 10
+  z0_tol_pct: 10
+
+analysis:
+  solvers: [dc_ir, thermal, coupled]
+  mesh: { cell: 0.25 }
+  output_dir: results
+  options:
+    thermal:
+      ambient: 25
+      h_top: 10
+      h_bottom: 5
+
+mechanical:
+  match: match.json          # written by `pcbsim match --json`
+  offset: [0, 0]             # config origin vs Gerber origin
+  apply_boundaries: true
+  require_ok: true           # NG match stops `pcbsim run` unless --force

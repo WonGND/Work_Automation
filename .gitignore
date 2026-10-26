@@ -43,3 +43,16 @@ desktop.ini
 # Temp / test outputs
 *.tmp
 _viz_test_*.xlsx
+
+# pcbsim
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+out/
+results/
+.inputs/
+.wrks/
+.sisyphus/
+node_modules

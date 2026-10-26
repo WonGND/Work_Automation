@@ -1,0 +1,789 @@
+{
+  "pcbsim_version": "0.1.0",
+  "kind": "pcbsim.match",
+  "ok": true,
+  "units": {
+    "length": "m",
+    "check_values": "mm (deg for rotation)"
+  },
+  "inputs": {
+    "gerber": "gerber",
+    "drill": [],
+    "mech": [
+      "mech.dxf"
+    ],
+    "pnp": null
+  },
+  "registration": {
+    "transform": {
+      "rotation_deg": -30.0,
+      "translation_m": [
+        -0.14392304845413267,
+        -0.009282032302755094
+      ],
+      "scale": 1.0,
+      "mirror": false,
+      "matrix": [
+        [
+          0.8660254037844386,
+          0.5
+        ],
+        [
+          -0.5,
+          0.8660254037844386
+        ]
+      ]
+    },
+    "rms_m": 5.148798380004454e-17,
+    "max_residual_m": 6.370386689386132e-17,
+    "outline_rms_m": 3.7819731234497167e-07,
+    "outline_rms_before_icp_m": 3.7819731234497167e-07,
+    "matched": 5,
+    "n_drawing_features": 5,
+    "n_board_features": 5,
+    "ambiguous": false,
+    "alternatives": [],
+    "warnings": []
+  },
+  "summary": {
+    "ng": 0,
+    "warn": 0,
+    "ok": 27
+  },
+  "checks": [
+    {
+      "category": "registration",
+      "subject": "feature RMS",
+      "status": "OK",
+      "value": 5.148798380004454e-14,
+      "limit": 0.05,
+      "unit": "mm",
+      "message": "5 of 5 drawing features matched",
+      "location": null
+    },
+    {
+      "category": "registration",
+      "subject": "outline RMS (after ICP)",
+      "status": "OK",
+      "value": 0.00037819731234497165,
+      "limit": null,
+      "unit": "mm",
+      "message": "before ICP 0.0004 mm",
+      "location": null
+    },
+    {
+      "category": "hole_position",
+      "subject": "hole @(3.50, 3.50) ⌀3.20",
+      "status": "OK",
+      "value": 2.6992932749401028e-14,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.0035,
+        0.0035
+      ]
+    },
+    {
+      "category": "hole_diameter",
+      "subject": "hole @(3.50, 3.50) ⌀3.20",
+      "status": "OK",
+      "value": 0.0,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "drawing ⌀3.200 mm vs drill ⌀3.200 mm",
+      "location": [
+        0.0035,
+        0.0035
+      ]
+    },
+    {
+      "category": "hole_position",
+      "subject": "hole @(56.50, 3.50) ⌀3.20",
+      "status": "OK",
+      "value": 3.634908046050479e-14,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.0565,
+        0.0035
+      ]
+    },
+    {
+      "category": "hole_diameter",
+      "subject": "hole @(56.50, 3.50) ⌀3.20",
+      "status": "OK",
+      "value": 0.0,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "drawing ⌀3.200 mm vs drill ⌀3.200 mm",
+      "location": [
+        0.0565,
+        0.0035
+      ]
+    },
+    {
+      "category": "hole_position",
+      "subject": "hole @(21.00, 27.00) ⌀2.00",
+      "status": "OK",
+      "value": 3.95577815330262e-14,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.021,
+        0.027
+      ]
+    },
+    {
+      "category": "hole_diameter",
+      "subject": "hole @(21.00, 27.00) ⌀2.00",
+      "status": "OK",
+      "value": 0.0,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "drawing ⌀2.000 mm vs drill ⌀2.000 mm",
+      "location": [
+        0.021,
+        0.027
+      ]
+    },
+    {
+      "category": "hole_position",
+      "subject": "hole @(56.50, 36.50) ⌀3.20",
+      "status": "OK",
+      "value": 4.046035655711836e-14,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.0565,
+        0.0365
+      ]
+    },
+    {
+      "category": "hole_diameter",
+      "subject": "hole @(56.50, 36.50) ⌀3.20",
+      "status": "OK",
+      "value": 0.0,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "drawing ⌀3.200 mm vs drill ⌀3.200 mm",
+      "location": [
+        0.0565,
+        0.0365
+      ]
+    },
+    {
+      "category": "hole_position",
+      "subject": "hole @(3.50, 36.50) ⌀3.20",
+      "status": "OK",
+      "value": 5.4279453211145936e-14,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.0035,
+        0.0365
+      ]
+    },
+    {
+      "category": "hole_diameter",
+      "subject": "hole @(3.50, 36.50) ⌀3.20",
+      "status": "OK",
+      "value": 0.0,
+      "limit": 0.1,
+      "unit": "mm",
+      "message": "drawing ⌀3.200 mm vs drill ⌀3.200 mm",
+      "location": [
+        0.0035,
+        0.0365
+      ]
+    },
+    {
+      "category": "outline",
+      "subject": "board outline (Hausdorff)",
+      "status": "OK",
+      "value": 0.0011491967055726198,
+      "limit": 0.2,
+      "unit": "mm",
+      "message": "",
+      "location": null
+    },
+    {
+      "category": "cutout",
+      "subject": "cutout @(31.00, 34.00)",
+      "status": "OK",
+      "value": 4.1777673608052095e-14,
+      "limit": 0.2,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.031,
+        0.03400000000000001
+      ]
+    },
+    {
+      "category": "component_position",
+      "subject": "U1",
+      "status": "OK",
+      "value": 3.1031676915590914e-14,
+      "limit": 0.5,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.045,
+        0.02
+      ]
+    },
+    {
+      "category": "component_rotation",
+      "subject": "U1",
+      "status": "OK",
+      "value": null,
+      "limit": 2.0,
+      "unit": "deg",
+      "message": "square/round body: rotation not checkable from its outline",
+      "location": [
+        0.045,
+        0.02
+      ]
+    },
+    {
+      "category": "component_position",
+      "subject": "U2",
+      "status": "OK",
+      "value": 4.5236053827798e-14,
+      "limit": 0.5,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.011,
+        0.02
+      ]
+    },
+    {
+      "category": "component_rotation",
+      "subject": "U2",
+      "status": "OK",
+      "value": null,
+      "limit": 2.0,
+      "unit": "deg",
+      "message": "square/round body: rotation not checkable from its outline",
+      "location": [
+        0.011,
+        0.02
+      ]
+    },
+    {
+      "category": "component_position",
+      "subject": "L1",
+      "status": "OK",
+      "value": 4.060883542877795e-14,
+      "limit": 0.5,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.0195,
+        0.0325
+      ]
+    },
+    {
+      "category": "component_rotation",
+      "subject": "L1",
+      "status": "OK",
+      "value": 1.3252311172764618e-13,
+      "limit": 2.0,
+      "unit": "deg",
+      "message": "body outline orientation, compared modulo 90°",
+      "location": [
+        0.0195,
+        0.0325
+      ]
+    },
+    {
+      "category": "component_position",
+      "subject": "U3",
+      "status": "OK",
+      "value": 3.4964469463373513e-14,
+      "limit": 0.5,
+      "unit": "mm",
+      "message": "",
+      "location": [
+        0.022,
+        0.007
+      ]
+    },
+    {
+      "category": "component_rotation",
+      "subject": "U3",
+      "status": "OK",
+      "value": null,
+      "limit": 2.0,
+      "unit": "deg",
+      "message": "square/round body: rotation not checkable from its outline",
+      "location": [
+        0.022,
+        0.007
+      ]
+    },
+    {
+      "category": "height",
+      "subject": "U1",
+      "status": "OK",
+      "value": 13.0,
+      "limit": 0.5,
+      "unit": "mm",
+      "message": "top 2.00 mm, ceiling 15.00 mm",
+      "location": [
+        0.04499999999999997,
+        0.019999999999999987
+      ]
+    },
+    {
+      "category": "height",
+      "subject": "U2",
+      "status": "OK",
+      "value": 13.5,
+      "limit": 0.5,
+      "unit": "mm",
+      "message": "top 1.50 mm, ceiling 15.00 mm",
+      "location": [
+        0.010999999999999954,
+        0.019999999999999997
+      ]
+    },
+    {
+      "category": "height",
+      "subject": "L1",
+      "status": "OK",
+      "value": 12.0,
+      "limit": 0.5,
+      "unit": "mm",
+      "message": "top 3.00 mm, ceiling 15.00 mm",
+      "location": [
+        0.019499999999999962,
+        0.03249999999999999
+      ]
+    },
+    {
+      "category": "height",
+      "subject": "U3",
+      "status": "OK",
+      "value": 1.0,
+      "limit": 0.5,
+      "unit": "mm",
+      "message": "top 1.00 mm, ceiling 2.00 mm",
+      "location": [
+        0.021999999999999964,
+        0.006999999999999996
+      ]
+    },
+    {
+      "category": "height",
+      "subject": "heatsink HS_U1",
+      "status": "OK",
+      "value": 2.999999999999999,
+      "limit": 0.5,
+      "unit": "mm",
+      "message": "top 12.00 mm, ceiling 15.00 mm",
+      "location": [
+        0.04499999999999997,
+        0.019999999999999993
+      ]
+    }
+  ],
+  "thermal_boundaries": [
+    {
+      "name": "hs_U1",
+      "kind": "convection",
+      "side": "top",
+      "polygon_m": null,
+      "component": "U1",
+      "h": null,
+      "resistance": 6.0,
+      "temperature_K": null,
+      "ambient_K": null,
+      "note": "heat sink HS_U1 on U1: R_sa = 6 K/W (layer map)"
+    },
+    {
+      "name": "chassis_CHASSIS_BL",
+      "kind": "fixed_temperature",
+      "side": "bottom",
+      "polygon_m": [
+        [
+          0.0009999999999999454,
+          0.0050000000000000044
+        ],
+        [
+          0.004999999999999977,
+          0.0049999999999999906
+        ],
+        [
+          0.004999999999999949,
+          0.000999999999999994
+        ],
+        [
+          0.0009999999999999454,
+          0.000999999999999987
+        ]
+      ],
+      "component": null,
+      "h": null,
+      "resistance": null,
+      "temperature_K": 318.15,
+      "ambient_K": null,
+      "note": "ideal chassis contact"
+    },
+    {
+      "name": "chassis_CHASSIS_TR",
+      "kind": "fixed_temperature",
+      "side": "bottom",
+      "polygon_m": [
+        [
+          0.05499999999999999,
+          0.03899999999999999
+        ],
+        [
+          0.059,
+          0.03899999999999998
+        ],
+        [
+          0.059,
+          0.034999999999999976
+        ],
+        [
+          0.05499999999999994,
+          0.034999999999999976
+        ]
+      ],
+      "component": null,
+      "h": null,
+      "resistance": null,
+      "temperature_K": 318.15,
+      "ambient_K": null,
+      "note": "ideal chassis contact"
+    },
+    {
+      "name": "case_CASE_LID",
+      "kind": "convection",
+      "side": "top",
+      "polygon_m": [
+        [
+          0.001,
+          0.0
+        ],
+        [
+          0.000913,
+          4e-06
+        ],
+        [
+          0.000826,
+          1.5e-05
+        ],
+        [
+          0.000741,
+          3.4e-05
+        ],
+        [
+          0.000658,
+          6e-05
+        ],
+        [
+          0.000577,
+          9.4e-05
+        ],
+        [
+          0.0005,
+          0.000134
+        ],
+        [
+          0.000426,
+          0.000181
+        ],
+        [
+          0.000357,
+          0.000234
+        ],
+        [
+          0.000293,
+          0.000293
+        ],
+        [
+          0.000234,
+          0.000357
+        ],
+        [
+          0.000181,
+          0.000426
+        ],
+        [
+          0.000134,
+          0.0005
+        ],
+        [
+          9.4e-05,
+          0.000577
+        ],
+        [
+          6e-05,
+          0.000658
+        ],
+        [
+          3.4e-05,
+          0.000741
+        ],
+        [
+          1.5e-05,
+          0.000826
+        ],
+        [
+          4e-06,
+          0.000913
+        ],
+        [
+          0.0,
+          0.001
+        ],
+        [
+          0.0,
+          0.039
+        ],
+        [
+          4e-06,
+          0.039087
+        ],
+        [
+          1.5e-05,
+          0.039174
+        ],
+        [
+          3.4e-05,
+          0.039259
+        ],
+        [
+          6e-05,
+          0.039342
+        ],
+        [
+          9.4e-05,
+          0.039423
+        ],
+        [
+          0.000134,
+          0.0395
+        ],
+        [
+          0.000181,
+          0.039574
+        ],
+        [
+          0.000234,
+          0.039643
+        ],
+        [
+          0.000293,
+          0.039707
+        ],
+        [
+          0.000357,
+          0.039766
+        ],
+        [
+          0.000426,
+          0.039819
+        ],
+        [
+          0.0005,
+          0.039866
+        ],
+        [
+          0.000577,
+          0.039906
+        ],
+        [
+          0.000658,
+          0.03994
+        ],
+        [
+          0.000741,
+          0.039966
+        ],
+        [
+          0.000826,
+          0.039985
+        ],
+        [
+          0.000913,
+          0.039996
+        ],
+        [
+          0.001,
+          0.04
+        ],
+        [
+          0.059,
+          0.04
+        ],
+        [
+          0.059087,
+          0.039996
+        ],
+        [
+          0.059174,
+          0.039985
+        ],
+        [
+          0.059259,
+          0.039966
+        ],
+        [
+          0.059342,
+          0.03994
+        ],
+        [
+          0.059423,
+          0.039906
+        ],
+        [
+          0.0595,
+          0.039866
+        ],
+        [
+          0.059574,
+          0.039819
+        ],
+        [
+          0.059643,
+          0.039766
+        ],
+        [
+          0.059707,
+          0.039707
+        ],
+        [
+          0.059766,
+          0.039643
+        ],
+        [
+          0.059819,
+          0.039574
+        ],
+        [
+          0.059866,
+          0.0395
+        ],
+        [
+          0.059906,
+          0.039423
+        ],
+        [
+          0.05994,
+          0.039342
+        ],
+        [
+          0.059966,
+          0.039259
+        ],
+        [
+          0.059985,
+          0.039174
+        ],
+        [
+          0.059996,
+          0.039087
+        ],
+        [
+          0.06,
+          0.039
+        ],
+        [
+          0.06,
+          0.001
+        ],
+        [
+          0.059996,
+          0.000913
+        ],
+        [
+          0.059985,
+          0.000826
+        ],
+        [
+          0.059966,
+          0.000741
+        ],
+        [
+          0.05994,
+          0.000658
+        ],
+        [
+          0.059906,
+          0.000577
+        ],
+        [
+          0.059866,
+          0.0005
+        ],
+        [
+          0.059819,
+          0.000426
+        ],
+        [
+          0.059766,
+          0.000357
+        ],
+        [
+          0.059707,
+          0.000293
+        ],
+        [
+          0.059643,
+          0.000234
+        ],
+        [
+          0.059574,
+          0.000181
+        ],
+        [
+          0.0595,
+          0.000134
+        ],
+        [
+          0.059423,
+          9.4e-05
+        ],
+        [
+          0.059342,
+          6e-05
+        ],
+        [
+          0.059259,
+          3.4e-05
+        ],
+        [
+          0.059174,
+          1.5e-05
+        ],
+        [
+          0.059087,
+          4e-06
+        ],
+        [
+          0.059,
+          0.0
+        ]
+      ],
+      "component": null,
+      "h": 1.7533333333333334,
+      "resistance": null,
+      "temperature_K": null,
+      "ambient_K": 313.15,
+      "note": "air gap 15.00 mm to case: h = k_air/g = 1.75 W/m²K"
+    }
+  ],
+  "notes": [],
+  "warnings": [],
+  "component_source": "gerber_x3"
+}
