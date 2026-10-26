@@ -1,0 +1,49 @@
+# Electrical intent for examples/kicad/soc_4layer.kicad_pcb (KiCad stores the geometry,
+# not sources, loads, power or thermal data). Layers may be given by their KiCad user
+# names (L1_TOP …) or canonical names (F.Cu …); components by reference designator.
+version: 1
+name: soc_4layer_kicad
+kicad:
+  file: soc_4layer.kicad_pcb
+  vias:                                 # KiCad has no via fill: mark the thermal vias
+    - { net: GND, drill: 0.3, filled: true, filler: via_fill_epoxy }
+
+nets:
+  - { name: VDD_1V0, kind: power, voltage: 1.0 }
+  - { name: GND, kind: ground }
+
+components:                             # footprints come from the board file
+  - { ref: U1, power: 4.0 W, tj_max: 105, theta_jc: 0.5, theta_jb: 3.0 }
+  - { ref: U2, power: 0.6 W, tj_max: 125, theta_jc: 2.0, theta_jb: 8.0 }
+  - { ref: L1, power: 0.25 W, tj_max: 125 }
+  - { ref: U3, power: 0.15 W }
+
+ports:
+  - { name: VRM_OUT, kind: voltage_source, net: VDD_1V0, layer: L1_TOP, reference_net: GND,
+      rect: [8, 17, 14, 23], voltage: 1.0 V }
+  - { name: SOC_CORE, kind: current_sink, net: VDD_1V0, layer: L1_TOP, reference_net: GND,
+      rect: [41, 16, 49, 24], current: 6 A }
+
+thermal_boundaries:
+  - { name: U1_heatsink, kind: convection, component: U1, resistance: 6.0 }
+  - { name: chassis_standoffs, kind: fixed_temperature, side: bottom, temperature: 45,
+      polygon: [[1, 1], [5, 1], [5, 5], [1, 5]] }
+  - { name: chassis_standoff_tr, kind: fixed_temperature, side: bottom, temperature: 45,
+      rect: [55, 35, 59, 39] }
+
+transmission_lines:
+  - { name: clk, layer: L1_TOP, width: 0.36, target: 50 }
+
+criteria:
+  ir_drop_pct: 3.0
+  tj_max_default: 105
+  current_density: ipc2152
+  current_density_temp_rise: 10
+  z0_tol_pct: 10
+
+analysis:
+  solvers: [dc_ir, thermal, coupled, si]
+  mesh: { cell: 0.25 }
+  output_dir: results
+  options:
+    thermal: { ambient: 25, h_top: 10, h_bottom: 5 }

@@ -2,7 +2,7 @@
 
 Open-source PCB multiphysics simulator, written in Python 3.11+.
 
-pcbsim reads a board description (a YAML config now, KiCad `.kicad_pcb` later), meshes the copper layers, and runs physics solvers through a plugin interface:
+pcbsim reads a board description (a YAML config, or a KiCad `.kicad_pcb` plus a small YAML overlay), meshes the copper layers, and runs physics solvers through a plugin interface:
 
 | solver      | physics                                                         | status   |
 | ----------- | --------------------------------------------------------------- | -------- |
@@ -32,6 +32,10 @@ pcbsim solvers                          # list registered solver plugins
 pcbsim run examples/soc_4layer.yaml     # dc_ir + thermal + coupled + si → results/ (JSON, NPZ, PNG)
 pcbsim run examples/soc_4layer.yaml --solver si   # one solver only
 
+# KiCad board + electrical overlay (sources, loads, power) — examples/kicad
+pcbsim check examples/kicad/soc_4layer.kicad_pcb     # inspect the geometry import
+pcbsim run   examples/kicad/soc_kicad.yaml
+
 # impedance calculator, no config needed (lengths in mm, or with units)
 pcbsim z0 microstrip -w 0.36 -H 0.2 -t 35um --er 4.2
 pcbsim z0 stripline  -w 0.15 -H 0.5 -s 0.2 --er 4.0     # -s → differential pair
@@ -57,7 +61,7 @@ pcbsim/
   model/      Board, Stackup, Layer, Net, Shape(Polygon), Via, Component, Port, Criteria
   io/         YAML config loader (pydantic v2); Gerber X2/X3, Excellon, PnP CSV;
               DXF (ezdxf), DWG via ODA/LibreDWG, STEP via cadquery (optional);
-              KiCad parser in stage 6
+              KiCad .kicad_pcb (sexpr.py, kicad.py)
   registration/  ECAD–MCAD registration, checks, report, thermal boundaries
   materials/  YAML material DB (σ, α, εr, tanδ, k, ρ, cp, ε)
   mesh/       2.5D per-layer grids

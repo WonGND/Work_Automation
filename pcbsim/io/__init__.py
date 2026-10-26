@@ -5,7 +5,8 @@
   pick-and-place CSV (:mod:`~pcbsim.io.pnp`)
 * MCAD: DXF (:mod:`~pcbsim.io.dxf`), DWG via external converters (:mod:`~pcbsim.io.dwg`),
   STEP via optional cadquery (:mod:`~pcbsim.io.step`); dispatcher :mod:`~pcbsim.io.mech`
-* KiCad ``.kicad_pcb`` arrives in stage 6.
+* KiCad ``.kicad_pcb`` (:mod:`~pcbsim.io.kicad`, S-expressions in :mod:`~pcbsim.io.sexpr`),
+  used through the config's ``kicad:`` section
 """
 
 from __future__ import annotations
