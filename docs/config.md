@@ -46,6 +46,11 @@ thermal_boundaries:
   - { name: fan, kind: convection, side: top, rect: [...], h: 40, ambient: 30 }
   - { name: standoff, kind: fixed_temperature, side: bottom, rect: [...], temperature: 45 }
 
+transmission_lines:                     # solver "si"
+  - { name: ddr_dq, layer: L1_TOP, width: 0.36, target: 50 }            # single: target = Z0
+  - { name: usb_dp, layer: L1_TOP, width: 0.25, spacing: 0.18, target: 90,  # pair: target = Zdiff
+      tolerance_pct: 10, references: [L2_GND] }   # references optional: nearest planes
+
 criteria:
   ir_drop_pct: 3.0
   tj_max_default: 105            # °C, used when a component has no tj_max
@@ -61,6 +66,7 @@ analysis:
   output_dir: results            # relative to the config file
   options:                       # per-solver, validated by each solver
     dc_ir: { temperature: 25, method: direct }   # °C; method: direct | cg
+    si: { mesh: normal, box_factor: 30 }   # mesh: coarse | normal | fine
     thermal:
       ambient: 25              # °C
       h_top: 10                # W/(m²K), default 10

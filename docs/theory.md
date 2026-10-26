@@ -229,11 +229,81 @@ Implemented in stage 2; see §3.7.
 
 ---
 
-## 7. Signal integrity — characteristic impedance *(stage 5)*
+## 7. Signal integrity — characteristic impedance (stage 5) — `pcbsim/si/`, `pcbsim/solvers/si.py`
 
-* Microstrip: Hammerstad & Jensen closed-form equations for ε_eff and Z0, with the thickness correction [Hammerstad-Jensen], [Wadell].
-* Stripline and differential pairs: IPC-2141A equations [IPC-2141A], [Wadell].
-* Cross-check: a 2D electrostatic FEM cross-section solve (scikit-fem) of ∇·(ε∇φ) = 0 gives per-unit-length capacitance C (with dielectric) and C₀ (in air), from which Z0 = 1 / (c₀ √(C C₀)) and ε_eff = C / C₀.
+Quasi-TEM, lossless, non-magnetic lines. Every configured line is solved twice: by a 2D field solver (the reported value) and by the best closed form for its topology (a cross-check).
+
+### 7.1 Closed forms (`pcbsim/si/analytic.py`)
+
+η₀ = μ₀c₀ ≈ 376.73 Ω.
+
+**Microstrip, Hammerstad–Jensen** [Hammerstad-Jensen], [Wadell] §3.5, u = w/h:
+
+    f(u)   = 6 + (2π − 6)·exp(−(30.666/u)^0.7528)
+    Z01(u) = η₀/(2π) · ln(f/u + √(1 + (2/u)²))                       (air, < 0.01 %)
+    a = 1 + ln((u⁴ + (u/52)²)/(u⁴ + 0.432))/49 + ln(1 + (u/18.1)³)/18.7
+    b = 0.564·((εr − 0.9)/(εr + 3))^0.053
+    εe(u)  = (εr + 1)/2 + (εr − 1)/2 · (1 + 10/u)^(−ab)                (< 0.2 %)
+    Z0 = Z01(u)/√εe(u)
+
+Thickness correction: Δu₁ = (t/h)/π·ln(1 + 4e/((t/h)·coth²√(6.517u))), Δu_r = ½(1 + sech√(εr − 1))·Δu₁, then Z0 = Z01(u + Δu_r)/√εe(u + Δu_r) and εe = εe(u + Δu_r)·(Z01(u + Δu₁)/Z01(u + Δu_r))².
+
+**IPC-2141A** [IPC-2141A] (approximate, ±5–10 %, documented ranges noted in results):
+
+    microstrip            Z0 = 87/√(εr + 1.41) · ln(5.98h/(0.8w + t))         0.1 < w/h < 2
+    centred stripline     Z0 = 60/√εr · ln(1.9b/(0.8w + t))                   w/(b − t) < 0.35
+    offset stripline      Z0 = 80/√εr · ln(1.9(2h₁ + t)/(0.8w + t)) · (1 − h₁/(4(h₁ + h₂ + t)))
+    diff. microstrip      Zdiff = 2Z0 (1 − 0.48 e^(−0.96 s/h))
+    diff. stripline       Zdiff = 2Z0 (1 − 0.347 e^(−2.9 s/b))
+
+**Stripline, exact for t = 0** — Cohn, conformal mapping [Cohn-1954], [Pozar] §3.7:
+
+    k = sech(πw/2b),  Z0 = η₀/(4√εr) · K(k)/K(k′)
+
+**Stripline with thickness** — Wheeler [Wheeler-1978], [Wadell] §4.2.2.2 (≤ 0.5 %):
+
+    x = t/b,  m = 6/(3 + 2x/(1 − x))
+    Δw/(b − t) = x/(π(1 − x)) · (1 − ½ln[(x/(2 − x))² + (0.0796x/(w/b + 1.1x))^m])
+    W = w/(b − t) + Δw/(b − t)
+    Z0 = 30/√εr · ln(1 + 4/(πW)·[8/(πW) + √((8/(πW))² + 6.27)])
+
+**Edge-coupled stripline, exact for t = 0** — Cohn [Cohn-1955]:
+
+    k_e = tanh(πw/2b)·tanh(π(w + s)/2b),   k_o = tanh(πw/2b)·coth(π(w + s)/2b)
+    Z_{e,o} = η₀/(4√εr) · K(k′_{e,o})/K(k_{e,o}),   Zdiff = 2Z_o,   Zcomm = Z_e/2
+
+### 7.2 2D electrostatic field solver (`pcbsim/si/fem2d.py`)
+
+The cross-section potential satisfies ∇·(εr∇φ) = 0 with φ = 1 V on one signal conductor, 0 on all other conductors, the reference planes, and a distant rectangular shield. With φᵢ the solution for conductor i, the Maxwell capacitance matrix per unit length is the energy form
+
+    C_ij = ε₀ ∫ εr ∇φᵢ·∇φⱼ dA = ε₀ φᵢᵀ K φⱼ
+
+It is computed twice: with the dielectrics (C) and in vacuum (C⁽⁰⁾). For quasi-TEM lines [Pozar] §3.8, [Wadell] §1.4:
+
+    L = μ₀ε₀ (C⁽⁰⁾)⁻¹,   Z0 = 1/(c₀√(C·C⁽⁰⁾)),   εeff = C/C⁽⁰⁾
+
+For a symmetric pair the modal capacitances are C_o = C₁₁ − C₁₂ and C_e = C₁₁ + C₁₂, giving Z_odd, Z_even, Zdiff = 2Z_odd and Zcomm = Z_even/2.
+
+Discretisation: quadratic Lagrange triangles (P2, scikit-fem [scikit-fem]) on a tensor grid that contains every conductor edge and dielectric interface. Spacing grows geometrically (ratio 1.25) from h_min = (smallest feature)/24 at conductor edges, where the field is singular (φ ∝ r^(2/3) at a 90° corner [Williams-1952]). εr is constant per element. The shield sits 30 × the feature size away. Its effect on an open microstrip is < 0.1 % (test `test_box_size_effect_small`).
+
+### 7.3 Stack-up → cross-section (`pcbsim/si/xsection.py`)
+
+The ground-side reference is the nearest conductor layer below the trace (for a bottom-side microstrip, the one above it, with the stack flipped). A stripline has a second reference on the other side. `references:` overrides both. Dielectric layers between them become bands. The trace's own layer is filled with the dielectric on its far side: prepreg flows around inner traces, and an outer layer sees solder mask or air. A solder mask over a microstrip is modelled as conformal, i.e. the mask thickness on bare laminate and as a coating on the trace top and sides. Multiple dielectrics are reduced to one εr for the closed forms by the series (thickness-weighted harmonic) mean.
+
+### 7.4 Checks
+
+* `z0`: |Z − Z_target|/Z_target > tolerance (line `tolerance_pct`, else `criteria.z0_tol_pct`, default 10 %) → violation. Z is Z0 for a single trace and Zdiff for a pair.
+* `z0_crosscheck`: |Z_FEM − Z_formula|/Z_formula above the formula's expected accuracy → warning. The expected accuracy is 1 % for HJ/Wheeler, 0.5 % for Cohn, 8–10 % for IPC-2141, ≥ 6 % when solder mask is present, ≥ 3 % for layered dielectrics, and ≥ 15 % outside a formula's validity range.
+
+### 7.5 Verification (`tests/test_si.py`)
+
+* HJ against Pozar Ex. 3.7 (50 Ω on εr = 2.2) and Cohn against Pozar Ex. 3.5, both within 1 % / 0.5 %.
+* FEM vs Hammerstad–Jensen microstrip: < 2 % for w/h = 0.5…3, εr = 2.2…4.3, with and without trace thickness. In practice the difference is 0.1–0.4 %.
+* FEM vs Cohn exact stripline and coupled stripline: < 1 %. FEM vs Wheeler thick stripline: < 1 %.
+* Mesh convergence: halving h_min (1/16 → 1/128 of the feature) strictly lowers the error against Cohn's exact value, down to < 0.2 %.
+* Capacitance matrix: symmetric, C₁₂ < 0, and C = εr·C⁽⁰⁾ in a homogeneous dielectric.
+
+---
 
 ## 8. ECAD–MCAD registration — `pcbsim/io/{gerber,excellon,dxf,dwg,step}.py`, `pcbsim/registration/`
 
@@ -325,6 +395,10 @@ Electrical geometry (copper, pads, vias) always comes from the ECAD side. The me
 * **[Azar-Graebner]** K. Azar, J. E. Graebner, "Experimental determination of thermal conductivity of printed wiring boards," *Proc. IEEE SEMI-THERM*, 1996.
 * **[Hammerstad-Jensen]** E. Hammerstad, Ø. Jensen, "Accurate models for microstrip computer-aided design," *IEEE MTT-S Int. Microwave Symp. Dig.*, 1980, pp. 407–409.
 * **[Wadell]** B. C. Wadell, *Transmission Line Design Handbook*, Artech House, 1991.
+* **[Pozar]** D. M. Pozar, *Microwave Engineering*, 4th ed., Wiley, 2012, §3.7–3.8.
+* **[Cohn-1954]** S. B. Cohn, "Characteristic impedance of the shielded-strip transmission line," *IRE Trans. MTT* 2(2), 1954.
+* **[Cohn-1955]** S. B. Cohn, "Shielded coupled-strip transmission line," *IRE Trans. MTT* 3(5), 1955.
+* **[Wheeler-1978]** H. A. Wheeler, "Transmission-line properties of a stripline between parallel planes," *IEEE Trans. MTT* 26(11), 1978.
 * **[Rogers-RO4000]** Rogers Corp., *RO4000® Series High Frequency Circuit Materials* data sheet (public).
 * **[NIST-Solder]** NIST, *Database for Solder Properties with Emphasis on New Lead-free Solders*, 2002.
 * **[Elmer-Models]** CSC, *Elmer Models Manual* (open-source documentation).
