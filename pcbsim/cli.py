@@ -19,6 +19,7 @@ linked ECAD–MCAD match is NG (override with ``run --force``).
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -370,6 +371,8 @@ def cmd_run(args: argparse.Namespace, out: TextIO) -> int:
                 print(f"  via I_max {rs.scalars['via.i_max']:.3f} A", file=out)
         elif name == "thermal":
             _print_thermal(rs, g.layers, out)
+        elif name == "si":
+            _print_si(rs, out)
         for v in rs.violations:
             tag = {"violation": "FAIL", "warning": "warn", "info": "info"}[v.severity.value]
             print(f"  [{tag}] {v.message or v.check}", file=out)
@@ -381,6 +384,102 @@ def cmd_run(args: argparse.Namespace, out: TextIO) -> int:
     n_fail = counts[Severity.VIOLATION]
     print("PASS" if n_fail == 0 else f"FAIL ({n_fail} violation(s))", file=out)
     return EXIT_OK if n_fail == 0 else EXIT_VIOLATIONS
+
+
+def _print_si(rs: ResultSet, out: TextIO) -> None:
+    rows = []
+    for r in rs.meta["lines"]:
+        target = "-" if r["target"] is None else f"{r['target']:g} ±{r['tolerance_pct']:g}%"
+        ok = "" if r["target"] is None else ("ok" if r["passed"] else "FAIL")
+        rows.append(
+            [
+                r["name"],
+                r["topology"],
+                r["layer"],
+                f"{r['quantity']}",
+                f"{r['z_fem']:.2f}",
+                f"{r['z_formula']:.2f}",
+                f"{r['crosscheck_dev'] * 100:+.1f}%",
+                f"{r['eps_eff_fem']:.3f}",
+                target,
+                ok,
+            ]
+        )
+    head = ["line", "topology", "layer", "Z", "FEM [Ω]", "formula [Ω]", "Δ", "εeff", "target", ""]
+    print(_table(rows, head, {4, 5, 6, 7}), file=out)
+
+
+def cmd_z0(args: argparse.Namespace, out: TextIO) -> int:
+    """Stand-alone impedance calculator (no config needed)."""
+    from pcbsim.si.analytic import (
+        LineZ,
+        coupled_stripline_cohn,
+        diff_microstrip_ipc,
+        diff_stripline_ipc,
+        microstrip_hj,
+        microstrip_ipc,
+        stripline_cohn,
+        stripline_ipc,
+        stripline_wheeler,
+    )
+    from pcbsim.si.fem2d import CrossSection, FemOptions, Rect
+    from pcbsim.si.fem2d import solve as fem_solve
+    from pcbsim.units import parse_quantity
+
+    def ln(v: str) -> float:
+        try:
+            return float(v) * 1e-3
+        except ValueError:
+            return parse_quantity(v, "length")
+
+    w = ln(args.w)
+    h = ln(args.h)
+    t = ln(args.t)
+    s = ln(args.s) if args.s else None
+    er = float(args.er)
+
+    def num(v: float | None, nd: int = 2) -> str:
+        return "-" if v is None or not math.isfinite(v) else f"{v:.{nd}f}"
+
+    zs: list[LineZ] = []
+    if args.kind == "microstrip":
+        y0, top = h, None
+        bands = [(0.0, h, er)]
+        if s is None:
+            zs = [microstrip_hj(w, h, er, t), microstrip_ipc(w, h, er, t)]
+        else:
+            zs = [diff_microstrip_ipc(w, s, h, er, t)]
+    else:
+        b = h
+        y0, top = (b - t) / 2.0, b
+        bands = [(0.0, b, er)]
+        if s is None:
+            zs = [stripline_wheeler(w, b, t, er), stripline_ipc(w, b, er, t)]
+            if t == 0:
+                zs.insert(0, stripline_cohn(w, b, er))
+        else:
+            zs = [diff_stripline_ipc(w, s, b, er, t)]
+            if t == 0:
+                zs.insert(0, coupled_stripline_cohn(w, s, b, er))
+    if s is None:
+        conductors = [Rect(-w / 2, w / 2, y0, y0 + t)]
+    else:
+        conductors = [Rect(-s / 2 - w, -s / 2, y0, y0 + t), Rect(s / 2, s / 2 + w, y0, y0 + t)]
+    fem = fem_solve(CrossSection(conductors, bands, top), FemOptions())
+    zf = fem.single() if s is None else fem.pair()
+    geom = f"w={_mm(w)} h={_mm(h)} t={_mm(t)}" + (f" s={_mm(s)}" if s else "") + " mm"
+    print(f"{args.kind}  {geom}  εr={er:g}  (FEM: {fem.n_dofs} dofs)", file=out)
+    rows: list[list[str]] = []
+    if s is None:
+        for z in [zf, *zs]:
+            rows.append([z.method, num(z.z0), num(z.eps_eff, 3), z.note])
+        print(_table(rows, ["method", "Z0 [Ω]", "εeff", "note"], {1, 2}), file=out)
+    else:
+        for z in [zf, *zs]:
+            rows.append([z.method, num(z.z_odd), num(z.z_even), num(z.z_diff), z.note])
+        head = ["method", "Zodd [Ω]", "Zeven [Ω]", "Zdiff [Ω]", "note"]
+        print(_table(rows, head, {1, 2, 3}), file=out)
+    return EXIT_OK
 
 
 def cmd_report(args: argparse.Namespace, out: TextIO) -> int:
@@ -502,6 +601,24 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--json", help="write the match JSON here (for config 'mechanical.match')")
     m.add_argument("-v", "--verbose", action="store_true", help="list OK checks too")
     m.set_defaults(func=cmd_match)
+
+    z = sub.add_parser(
+        "z0",
+        help="impedance calculator: closed forms vs 2D FEM (lengths in mm or with units)",
+    )
+    z.add_argument("kind", choices=["microstrip", "stripline"])
+    z.add_argument("-w", required=True, help="trace width")
+    z.add_argument(
+        "--h",
+        "-H",
+        dest="h",
+        required=True,
+        help="microstrip: dielectric height; stripline: plane-to-plane spacing b",
+    )
+    z.add_argument("-t", default="0", help="trace thickness (default 0)")
+    z.add_argument("-s", help="edge-to-edge spacing → differential pair")
+    z.add_argument("--er", required=True, help="dielectric constant")
+    z.set_defaults(func=cmd_z0)
 
     s = sub.add_parser("solvers", help="list available solver plugins")
     s.set_defaults(func=cmd_solvers)

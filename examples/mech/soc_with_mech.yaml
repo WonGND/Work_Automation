@@ -102,6 +102,13 @@ ports:
     rect: [41, 16, 49, 24]
     current: 6 A
 
+# Controlled-impedance routing (stage 5, solver "si"). target = Z0 for a single
+# trace, Zdiff for a pair (spacing given); tolerance defaults to criteria.z0_tol_pct.
+transmission_lines:
+  - { name: ddr_dq,  layer: L1_TOP, width: 0.36, target: 50 }      # microstrip over L2_GND
+  - { name: usb_dp,  layer: L1_TOP, width: 0.25, spacing: 0.18, target: 90 }
+  - { name: clk_bot, layer: L4_BOT, width: 0.30, target: 50, references: [L3_PWR] }
+
 criteria:
   ir_drop_pct: 3.0
   tj_max_default: 105
@@ -110,7 +117,7 @@ criteria:
   z0_tol_pct: 10
 
 analysis:
-  solvers: [dc_ir, thermal, coupled]
+  solvers: [dc_ir, thermal, coupled, si]
   mesh: { cell: 0.25 }
   output_dir: results
   options:

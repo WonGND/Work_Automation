@@ -161,7 +161,7 @@ def test_shape_fill_xor_geometry(raw: dict[str, Any]) -> None:
 
 
 def test_options_for_unlisted_solver(raw: dict[str, Any]) -> None:
-    raw["analysis"]["options"]["si"] = {}
+    raw["analysis"]["options"]["em_openems"] = {}
     assert "analysis" in _err(raw)
 
 

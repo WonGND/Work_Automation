@@ -143,7 +143,7 @@ S = TypeVar("S", bound=type[Solver])
 
 _REGISTRY: dict[str, type[Solver]] = {}
 _ENTRY_POINTS_LOADED = False
-_BUILTINS = ("pcbsim.solvers.dc_ir", "pcbsim.solvers.thermal")
+_BUILTINS = ("pcbsim.solvers.dc_ir", "pcbsim.solvers.thermal", "pcbsim.solvers.si")
 
 
 def _load_entry_points() -> None:
