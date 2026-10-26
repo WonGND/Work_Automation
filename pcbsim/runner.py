@@ -121,6 +121,7 @@ def to_json_dict(run: RunResult) -> dict[str, Any]:
             "vias": rs.meta.get("vias", []),
             "components": rs.meta.get("components", []),
             "history": rs.meta.get("history", {}),
+            "lines": rs.meta.get("lines", []),
         }
     cleaned: dict[str, Any] = _clean(doc)
     return cleaned
