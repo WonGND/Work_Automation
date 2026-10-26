@@ -22,7 +22,8 @@ Zero suppression for coordinates without a decimal point
     decimal point are taken literally.
 
 Body
-    ``Tn`` selects a tool (``T0`` unloads); ``X…Y…`` drills (missing axis =
+    ``Tn`` (also ``T01``, ``T1F200S65``) selects a tool in the body (``T0`` unloads);
+    ``G05`` returns from route mode to drill mode; ``X…Y…`` drills (missing axis =
     modal previous value); ``X…Y…G85X…Y…`` is a slot; route mode ``G00X…Y…``
     then ``M15`` (tool down), ``G01X…Y…`` segments become slots, ``M16``/``M17``
     lifts; ``M30`` ends. Arcs (``G02``/``G03``) in route mode are reduced to a
@@ -169,29 +170,30 @@ def parse_excellon(
             continue
         if line == "M30" or line == "M00":
             break
-        if line.startswith(("FMAT", "VER", "ICI", "ATC", "G90", "G05", "DETECT", "OF", "T0")):
+        if re.fullmatch(r"T0+", line):
+            tool = None
+            continue
+        if line.startswith("G05"):
+            route = tool_down = False
+            continue
+        if line.startswith(("FMAT", "VER", "ICI", "ATC", "G90", "DETECT", "OF")):
             if line.startswith("ICI,ON") or line == "ICI":
                 data.warnings.append(f"{path.name}: incremental input (ICI) is not supported")
-            if line == "T0" or re.fullmatch(r"T0+", line):
-                tool = None
             continue
         if line.startswith("G91"):
             data.warnings.append(f"{path.name}:{lineno}: incremental mode G91 not supported")
             continue
         m = _TOOL_DEF.match(line)
-        if m and (in_header or "C" in m.group(2)) and m.group(2):
+        if m:
+            t = int(m.group(1))
             params = dict(_TOOL_PARAM.findall(m.group(2)))
             if "C" in params:
-                tools[int(m.group(1))] = (float(params["C"]) * fmt.unit, pending_tool_plated)
+                tools[t] = (float(params["C"]) * fmt.unit, pending_tool_plated)
                 pending_tool_plated = None
-                if not in_header:
-                    tool = int(m.group(1))
-            continue
-        if m and not m.group(2):
-            t = int(m.group(1))
-            tool = t if t != 0 else None
-            if tool is not None and tool not in tools:
-                data.warnings.append(f"{path.name}:{lineno}: tool T{t} used but not defined")
+            if not in_header:
+                tool = t
+                if t not in tools:
+                    data.warnings.append(f"{path.name}:{lineno}: tool T{t} used but not defined")
             continue
         if in_header:
             continue

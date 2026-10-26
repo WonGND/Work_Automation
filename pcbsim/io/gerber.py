@@ -36,7 +36,8 @@ Plotting (§4.7, §4.8)
 
 Regions (§4.10)
     Between ``G36`` and ``G37`` every D01 sequence is a contour; ``D02`` closes
-    the current contour and starts a new one. Contours combine even-odd.
+    the current contour and starts a new one. Each contour is a separate dark
+    object, so the contours are united; holes come from cut-ins or ``%LPC%``.
 
 Polarity (§4.9.2)
     ``%LPD*%`` adds to the image, ``%LPC*%`` clears what was drawn before.
@@ -216,6 +217,8 @@ class Aperture:
     diameter: float = 0.0
     attributes: Attrs = field(default_factory=dict)
     block: list[tuple[bool, BaseGeometry]] | None = None
+    block_flashes: list[Flash] = field(default_factory=list)
+    block_paths: list[LineString] = field(default_factory=list)
 
 
 def _std_aperture(kind: str, params: list[float], unit: float) -> Aperture:
@@ -352,6 +355,15 @@ class _State:
     contours: list[list[tuple[float, float]]] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class _Block:
+    name: str
+    dark: bool
+    items: list[tuple[bool, BaseGeometry]] = field(default_factory=list)
+    flashes: list[Flash] = field(default_factory=list)
+    paths: list[LineString] = field(default_factory=list)
+
+
 class _Image:
     """Polarity-aware accumulator with batching."""
 
@@ -447,7 +459,7 @@ class _Parser:
         self.image = _Image()
         self.ta: Attrs = {}
         self.to: Attrs = {}
-        self.block_stack: list[tuple[str, list[tuple[bool, BaseGeometry]], bool]] = []
+        self.block_stack: list[_Block] = []
         self.sr: tuple[int, int, float, float] | None = None
         self.sr_items: list[tuple[bool, BaseGeometry]] = []
         self.sr_flashes: list[Flash] = []
@@ -463,7 +475,7 @@ class _Parser:
 
     def emit(self, g: BaseGeometry) -> None:
         if self.block_stack:
-            self.block_stack[-1][1].append((self.st.dark, g))
+            self.block_stack[-1].items.append((self.st.dark, g))
         elif self.sr is not None:
             self.sr_items.append((self.st.dark, g))
         else:
@@ -471,6 +483,7 @@ class _Parser:
 
     def emit_path(self, ls: LineString) -> None:
         if self.block_stack:
+            self.block_stack[-1].paths.append(ls)
             return
         if self.sr is not None:
             self.sr_paths.append(ls)
@@ -479,6 +492,7 @@ class _Parser:
 
     def emit_flash(self, f: Flash) -> None:
         if self.block_stack:
+            self.block_stack[-1].flashes.append(f)
             return
         if self.sr is not None:
             self.sr_flashes.append(f)
@@ -581,11 +595,15 @@ class _Parser:
         elif ext.startswith("AB"):
             name = ext[2:]
             if name:
-                self.block_stack.append((name, [], st.dark))
+                code = re.fullmatch(r"D0*(\d+)", name)
+                key = f"D{int(code.group(1))}" if code else name
+                self.block_stack.append(_Block(key, st.dark))
             elif self.block_stack:
-                bname, items, prev_dark = self.block_stack.pop()
-                st.dark = prev_dark
-                self.apertures[bname] = Aperture(Polygon(), "B", 0.0, dict(self.ta), items)
+                blk = self.block_stack.pop()
+                st.dark = blk.dark
+                self.apertures[blk.name] = Aperture(
+                    Polygon(), "B", 0.0, dict(self.ta), blk.items, blk.flashes, blk.paths
+                )
         elif ext.startswith("SR"):
             if self.sr is not None:
                 self.close_sr()
@@ -774,6 +792,12 @@ class _Parser:
         attrs: Attrs = {**ap.attributes, **self.to}
         self.emit_flash(Flash(x, y, self.st.aperture or "", attrs))
         if ap.block is not None:
+            for f in ap.block_flashes:
+                self.emit_flash(Flash(f.x + x, f.y + y, f.aperture, f.attributes))
+            for ls in ap.block_paths:
+                moved = affinity.translate(ls, x, y)
+                assert isinstance(moved, LineString)
+                self.emit_path(moved)
             for dark, g in ap.block:
                 prev = self.st.dark
                 self.st.dark = dark if prev else not dark
@@ -790,11 +814,11 @@ class _Parser:
 
     def end_region(self) -> None:
         st = self.st
-        geom: BaseGeometry = Polygon()
+        polys: list[BaseGeometry] = []
         for c in st.contours:
             self.emit_path(LineString([*c, c[0]] if c[0] != c[-1] else c))
-            poly = shapely.make_valid(Polygon(c))
-            geom = geom.symmetric_difference(poly)
+            polys.append(shapely.make_valid(Polygon(c)))
+        geom = shapely.union_all(polys) if polys else Polygon()
         st.region, st.contours = False, []
         if not geom.is_empty:
             self.emit(geom)

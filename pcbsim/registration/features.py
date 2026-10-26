@@ -69,6 +69,7 @@ class MechBody:
     z_top: float
     ref: str | None = None
     limit: float | None = None  # keepout ceiling (m above the board)
+    limit_from_drawing: bool = False  # True: limit is drawing geometry → follows the scale
 
 
 @dataclass(slots=True)
@@ -245,16 +246,27 @@ def extract_mech(drawing: MechDrawing, lmap: LayerMap) -> MechFeatures:
                     continue
             gd = m.groupdict()
             limit: float | None = None
+            from_drawing = False
             hval = gd.get("h") or gd.get("height")
             if role == "keepout":
                 if hval is not None:
                     limit = float(hval) * _map_unit_scale(lmap)
                 elif it.height > 0 or it.z_base > 0:
                     limit = it.z_top
+                    from_drawing = True
                 else:
                     limit = 0.0
             bodies.append(
-                MechBody(it.layer, role, geom, it.z_base, it.z_top, gd.get("ref") or None, limit)
+                MechBody(
+                    it.layer,
+                    role,
+                    geom,
+                    it.z_base,
+                    it.z_top,
+                    gd.get("ref") or None,
+                    limit,
+                    from_drawing,
+                )
             )
             break
     if ml.comp_3d is not None:
@@ -311,7 +323,8 @@ def transform_body(t: Similarity2D, b: MechBody) -> MechBody:
         b.z_base * s,
         b.z_top * s,
         b.ref,
-        b.limit,
+        b.limit * s if b.limit is not None and b.limit_from_drawing else b.limit,
+        b.limit_from_drawing,
     )
 
 

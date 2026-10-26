@@ -69,13 +69,14 @@ def test_region_with_arc_corner() -> None:
     assert _area(_g(body)) == pytest.approx(expected, rel=2e-3)
 
 
-def test_region_two_contours_even_odd() -> None:
+def test_region_contours_are_united() -> None:
+    """§4.10: every contour is its own dark object; overlap is not cleared."""
     body = (
         "G36*\nX0Y0D02*\nG01*\nX10000000Y0D01*\nX10000000Y10000000D01*\nX0Y10000000D01*\n"
-        "X0Y0D01*\nX2000000Y2000000D02*\nX4000000Y2000000D01*\nX4000000Y4000000D01*\n"
-        "X2000000Y4000000D01*\nX2000000Y2000000D01*\nG37*"
+        "X0Y0D01*\nX5000000Y0D02*\nX15000000Y0D01*\nX15000000Y10000000D01*\n"
+        "X5000000Y10000000D01*\nX5000000Y0D01*\nG37*"
     )
-    assert _area(_g(body)) == pytest.approx(96e-6)
+    assert _area(_g(body)) == pytest.approx(150e-6)
 
 
 def test_g75_full_circle_stroke() -> None:
@@ -141,8 +142,13 @@ def test_step_repeat() -> None:
 
 
 def test_block_aperture() -> None:
-    body = "%ADD10C,1*%\n%ABD20*%\nD10*\nX0Y0D03*\nX2000000Y0D03*\n%AB*%\nD20*\nX10000000Y0D03*"
+    body = (
+        "%ADD10C,1*%\n%ABD020*%\nD10*\n%TO.C,FID1*%\nX0Y0D03*\n%TD*%\nX2000000Y0D03*\n%AB*%\n"
+        "D20*\nX10000000Y0D03*"
+    )
     layer = parse_gerber("t.gbr", text=_g(body))
+    assert sorted(f.x for f in layer.flashes) == pytest.approx([10e-3, 10e-3, 12e-3])
+    assert component_centroids(layer) == {"FID1": pytest.approx((10e-3, 0.0))}
     assert layer.geometry is not None
     assert layer.geometry.area == pytest.approx(2 * math.pi * 0.25e-6, rel=2e-3)
     assert layer.geometry.bounds[0] == pytest.approx(9.5e-3)

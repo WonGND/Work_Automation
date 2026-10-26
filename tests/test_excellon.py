@@ -122,3 +122,26 @@ def test_load_drills_merges(tmp_path: Path) -> None:
     d = load_drills([a, b])
     assert len(d.holes) == 5
     assert sum(1 for h in d.holes if h.plated is False) == 2
+
+
+def test_leading_zero_tool_numbers() -> None:
+    text = "M48\nMETRIC\nT01C0.300\nT02C3.000\n%\nT01\nX1.0Y1.0\nT02\nX2.0Y2.0\nT0\nM30\n"
+    holes = parse_excellon("x.drl", text=text).holes
+    assert [h.diameter for h in holes] == pytest.approx([0.3e-3, 3e-3])
+    assert [h.tool for h in holes] == ["T1", "T2"]
+
+
+def test_tool_select_with_feed_and_speed() -> None:
+    text = "M48\nINCH,TZ\nT1C0.0400\nT2C0.1250\n%\nT1F200S65\nX10000Y10000\nT2F100S40\nX20000Y10000\nM30\n"
+    holes = parse_excellon("x.drl", text=text).holes
+    assert [h.diameter for h in holes] == pytest.approx([0.04 * 25.4e-3, 0.125 * 25.4e-3])
+
+
+def test_drill_mode_after_route_g05() -> None:
+    text = (
+        "M48\nMETRIC\nT1C1.0\nT2C0.5\n%\nT1\nG00X1.0Y1.0\nM15\nG01X5.0Y1.0\nM16\nG05\n"
+        "T2\nX10.0Y10.0\nX11.0Y10.0\nM30\n"
+    )
+    d = parse_excellon("x.drl", text=text)
+    assert len(d.slots) == 1
+    assert [(h.x, h.diameter) for h in d.holes] == pytest.approx([(10e-3, 0.5e-3), (11e-3, 0.5e-3)])
