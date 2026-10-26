@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pcbsim"
+version = "0.1.0"
+description = "Open-source PCB multiphysics simulator (DC IR drop, thermal, coupled, SI)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "pcbsim contributors" }]
+keywords = ["pcb", "pdn", "ir-drop", "thermal", "signal-integrity", "fem"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "pyyaml>=6.0",
+    "scikit-fem>=9.0",
+    "pydantic>=2.6",
+    "shapely>=2.0",
+    "ezdxf>=1.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "types-PyYAML", "types-shapely"]
+gui = ["streamlit>=1.35"]
+# openEMS python bindings are not on PyPI; see README for installation.
+em = []
+# STEP part bounding boxes (pcbsim.io.step); cadquery bundles the OCP kernel.
+step = ["cadquery>=2.4"]
+
+[project.scripts]
+pcbsim = "pcbsim.cli:main"
+
+[project.entry-points."pcbsim.solvers"]
+# Third-party solver plugins register here, e.g.
+# my_solver = "my_pkg.module:MySolver"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pcbsim"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"pcbsim/materials/data" = "pcbsim/materials/data"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF", "NPY", "PT"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # allow Greek letters (σ, ρ, α) in docstrings/strings
+
+[tool.mypy]
+python_version = "3.11"
+files = ["pcbsim", "tests"]
+strict = true
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["skfem.*", "matplotlib.*", "scipy.*", "OCP.*", "cadquery.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
