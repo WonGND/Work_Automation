@@ -4,6 +4,7 @@ import io
 from pathlib import Path
 
 import pytest
+import yaml
 
 from pcbsim.cli import EXIT_INVALID, EXIT_NOT_IMPLEMENTED, EXIT_OK, EXIT_USAGE, main
 
@@ -22,8 +23,18 @@ def test_check_example() -> None:
     assert "total" in text
 
 
-def test_check_strict_fails_on_warnings() -> None:
-    assert main(["check", "--strict", EXAMPLE], out=io.StringIO()) == EXIT_INVALID
+def test_check_strict_example_is_clean() -> None:
+    assert main(["check", "--strict", EXAMPLE], out=io.StringIO()) == EXIT_OK
+
+
+def test_check_strict_fails_on_warnings(tmp_path: Path) -> None:
+    d = yaml.safe_load(Path(EXAMPLE).read_text())
+    d["analysis"]["solvers"].append("em_openems")
+    f = tmp_path / "w.yaml"
+    f.write_text(yaml.safe_dump(d))
+    buf = io.StringIO()
+    assert main(["check", "--strict", str(f)], out=buf) == EXIT_INVALID
+    assert "'em_openems' is not available yet" in buf.getvalue()
 
 
 def test_check_invalid_config(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -77,7 +77,16 @@ analysis:
       joule: true              # add I²R heat from dc_ir (same mesh)
       mode: steady             # steady | transient
       transient: { t_end: 600, dt: 5, initial: ambient, power_steps: [[0, 1.0], [300, 0.2]] }
+    coupled:                   # electro-thermal iteration (docs/theory.md §5)
+      tol_t: 0.01              # K, max |ΔT| between passes
+      tol_v: 1.0e-5            # V, max |ΔV| between passes
+      max_iter: 50
+      relaxation: 1.0          # ω in (0, 1]; < 1 damps oscillation, cannot cure runaway
+      dc_ir: {}                # overrides of options.dc_ir for the coupled run only
+      thermal: {}              # overrides of options.thermal (mode is forced to steady)
 ```
+
+`coupled` runs `dc_ir` and `thermal` itself, using `options.dc_ir` and `options.thermal` (plus its own overrides), so those two option blocks are accepted even when only `coupled` is listed in `solvers`. Listing `dc_ir` and `thermal` as well gives the uncoupled results next to the coupled ones; `coupled` also reports the uncoupled values (`*.uncoupled` scalars) from its first pass.
 
 Material properties (SI): `sigma`, `alpha_r`, `t_ref` [K], `eps_r`, `tan_d`, `k_inplane`, `k_through` (or the shorthand `k`), `density`, `cp`, `emissivity`, `description`, `source`.
 

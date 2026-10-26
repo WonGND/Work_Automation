@@ -8,7 +8,7 @@ pcbsim reads a board description (a YAML config now, KiCad `.kicad_pcb` later), 
 | ----------- | --------------------------------------------------------------- | -------- |
 | `dc_ir`     | multi-layer PDN IR drop, via resistance, VRM / load ports       | done     |
 | `thermal`   | steady-state and transient 2.5D conduction, convection, radiation | done     |
-| `coupled`   | electro-thermal iteration with ρ(T) and Joule heating           | stage 4  |
+| `coupled`   | electro-thermal iteration with ρ(T) and Joule heating           | done     |
 | `si`        | microstrip, stripline and differential Z0; 2D FEM cross-check   | done     |
 | `em_openems`| S-parameters via openEMS (optional)                             | stage 8  |
 
@@ -29,7 +29,7 @@ pip install -e ".[dev]"
 ```bash
 pcbsim check examples/soc_4layer.yaml   # validate the config and print a board summary
 pcbsim solvers                          # list registered solver plugins
-pcbsim run examples/soc_4layer.yaml     # dc_ir + thermal + si → results/ (JSON, NPZ, PNG)
+pcbsim run examples/soc_4layer.yaml     # dc_ir + thermal + coupled + si → results/ (JSON, NPZ, PNG)
 pcbsim run examples/soc_4layer.yaml --solver si   # one solver only
 
 # impedance calculator, no config needed (lengths in mm, or with units)
@@ -42,7 +42,7 @@ pcbsim match --gerber examples/mech/gerber --mech examples/mech/mech.dxf \
 pcbsim run examples/mech/soc_with_mech.yaml   # add --force to simulate despite an NG match
 ```
 
-`coupled` (stage 4) is listed in the example config but not implemented yet; `pcbsim run` skips it with a note. `pcbsim report` (stage 7) is a placeholder that exits with code 3, so use the files in `results/` for now.
+`coupled` iterates `dc_ir` with ρ(T) and `thermal` with the resulting Joule heat until both fields stop changing. It prints the per-pass ΔT/ΔV history and the coupled-vs-uncoupled IR drop and Tj, and writes `coupled_convergence.png`. `pcbsim report` (stage 7) is a placeholder that exits with code 3, so use the files in `results/` for now.
 
 Exit codes: 0 pass, 1 invalid input, 2 usage, 3 not implemented, 4 design violations / NG, 5 run refused because the linked ECAD–MCAD match is NG.
 
@@ -62,7 +62,7 @@ pcbsim/
   materials/  YAML material DB (σ, α, εr, tanδ, k, ρ, cp, ε)
   mesh/       2.5D per-layer grids
   si/         transmission lines: closed forms, 2D FEM cross-section, stack-up mapping
-  solvers/    Solver ABC + registry (entry-point group "pcbsim.solvers"): dc_ir, thermal, si
+  solvers/    Solver ABC + registry (entry-point group "pcbsim.solvers"): dc_ir, thermal, coupled, si
   post/       heat maps, reports
   cli.py      `pcbsim` command
 ```
