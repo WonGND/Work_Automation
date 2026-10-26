@@ -139,7 +139,7 @@ def _excellon(holes: list[tuple[float, float, float]], plated: bool) -> str:
         s += f"; #@! TA.AperFunction,{func}\nT{k}C{d:.3f}\n"
     s += "%\nG90\nG05\n"
     for k, d in enumerate(tools, 1):
-        s += f"T{k}\n" + "".join(f"X{x:g}Y{y:g}\n" for x, y, dd in holes if dd == d)
+        s += f"T{k}\n" + "".join(f"X{x:.3f}Y{y:.3f}\n" for x, y, dd in holes if dd == d)
     return s + "M30\n"
 
 

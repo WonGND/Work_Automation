@@ -628,7 +628,11 @@ def load_config_dict(data: Mapping[str, Any], base_dir: Path | None = None) -> L
 
 
 def _apply_mechanical(ms: MechanicalSpec, board: Board, base: Path) -> tuple[Board, MechanicalLink]:
-    """Append the match result's thermal boundaries (board frame + ``offset``)."""
+    """Append the match result's thermal boundaries (board frame + ``offset``).
+
+    Boundaries already defined in the config win: a match boundary is skipped if its
+    name exists, or if it is a heat sink on a component that already has one.
+    """
     from dataclasses import replace
 
     from pcbsim.registration.pipeline import load_match
@@ -639,11 +643,12 @@ def _apply_mechanical(ms: MechanicalSpec, board: Board, base: Path) -> tuple[Boa
     applied: list[ThermalBoundary] = []
     if ms.apply_boundaries:
         existing = {t.name for t in board.thermal_boundaries}
+        sunk = {t.component for t in board.thermal_boundaries if t.component is not None}
         refs = {c.ref for c in board.components}
         for mb in stored.boundaries:
             if mb.name in existing:
                 continue
-            if mb.component is not None and mb.component not in refs:
+            if mb.component is not None and (mb.component not in refs or mb.component in sunk):
                 continue
             if mb.component is not None:
                 comp = next(c for c in board.components if c.ref == mb.component)
