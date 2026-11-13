@@ -10,6 +10,7 @@
 | `one-click-tool` | One_Click_정리_Tool | 원클릭 데이터 정리 도구 |
 | `bu-lotid-merge` | BU_LotID_merge | BU LotID 병합 및 GUI 도구 |
 | `cpk-analyzer` | CpkAnalyzer | Cpk 분석 도구 |
+| `work-mgmt-web` | 업무관리 웹 | 팀 업무 · 이슈 시간 입력과 업무로드 웹 (Bun · SQLite · 도커) |
 
 ## Usage
 
