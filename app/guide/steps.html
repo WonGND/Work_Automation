@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#fff;font-family:"Noto Sans CJK KR","Malgun Gothic",sans-serif;color:#000}
+.step{width:900px;height:600px;position:relative;overflow:hidden;background:#fff;margin-bottom:20px}
+.hd{height:78px;display:flex;align-items:center;gap:16px;padding:0 26px;background:#1e3a8a;color:#fff}
+.hd .n{width:46px;height:46px;border-radius:50%;background:#fff;color:#1e3a8a;font-weight:900;font-size:26px;display:flex;align-items:center;justify-content:center;flex:none}
+.hd .t{font-size:25px;font-weight:700;letter-spacing:-.5px}
+.hd .t em{font-style:normal;background:#fde047;color:#1e1b4b;padding:0 8px;border-radius:5px;margin:0 2px}
+.hd .s{font-size:15px;opacity:.85;margin-top:2px;font-weight:400}
+.stage{overflow:hidden;position:absolute;top:78px;left:0;right:0;bottom:0;background:linear-gradient(135deg,#dbe6f3,#c9d6e8);display:flex;align-items:center;justify-content:center}
+/* 윈도우 대화상자 */
+.win{zoom:1.12;background:#f0f0f0;border:1px solid #6b8bb5;box-shadow:0 8px 28px #0004;font-size:13px;position:relative}
+.win.white{background:#fff}
+.tb{height:31px;background:#fff;display:flex;align-items:center;padding-left:10px;gap:8px;font-size:12.5px;border-bottom:1px solid #eee}
+.tb .x{margin-left:auto;width:46px;height:31px;display:flex;align-items:center;justify-content:center;font-size:15px;color:#333}
+.bt{display:inline-flex;align-items:center;justify-content:center;min-width:86px;height:25px;padding:0 12px;background:#e1e1e1;border:1px solid #adadad;font-size:12.5px;white-space:nowrap}
+.bt.def{border:2px solid #0078d7}
+.row{display:flex;gap:8px;align-items:center}
+.ft{display:flex;justify-content:flex-end;gap:8px;padding:12px 14px;border-top:1px solid #dfdfdf;background:#f0f0f0}
+.radio{display:flex;align-items:center;gap:7px;margin:6px 0}
+.radio i{width:13px;height:13px;border:1px solid #333;border-radius:50%;display:inline-block;position:relative;background:#fff;flex:none}
+.radio i.on::after{content:"";position:absolute;inset:2.5px;border-radius:50%;background:#000}
+.chk{display:inline-block;width:13px;height:13px;border:1px solid #333;background:#fff;vertical-align:-2px;margin-right:6px;position:relative}
+.chk.on::after{content:"✓";position:absolute;top:-4px;left:1px;font-size:12px}
+.wz-h{font-size:19px;color:#003399;margin:4px 0 14px}
+.tbox{border:1px solid #7a7a7a;background:#fff;height:23px;padding:2px 5px;font-size:12.5px}
+/* 표시 */
+.mark{position:absolute;border:4px solid #e11d48;border-radius:8px;box-shadow:0 0 0 4px #fff8, 0 0 18px #e11d4888;pointer-events:none}
+.badge{position:absolute;width:34px;height:34px;border-radius:50%;background:#e11d48;color:#fff;font-weight:900;font-size:19px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px #0005;border:3px solid #fff}
+.tag{position:absolute;background:#e11d48;color:#fff;font-weight:700;font-size:15px;padding:4px 10px;border-radius:6px;white-space:nowrap;box-shadow:0 2px 6px #0004}
+.cur{position:absolute;width:26px;height:26px}
+.blur{filter:blur(3px)}
+.ico{display:inline-flex;width:30px;height:30px;flex:none}
+</style></head><body>
+
+<!-- 0. 로그인 화면 -->
+<section class="step" id="s0">
+  <div class="hd"><div class="n">1</div><div><div class="t">로그인 화면 아래 <em>노란 상자</em> 누르기</div><div class="s">https://192.168.0.10:8443 접속 → 그림을 넘기며 그대로 따라 하기</div></div></div>
+  <div class="stage" style="background:#f4f6fa">
+    <img src="login.png" style="position:absolute;left:-100px;top:-90px">
+    <div class="mark" style="left:291px;top:275px;width:318px;height:91px"></div>
+    <div class="tag" style="left:621px;top:306px">클릭</div>
+  </div>
+</section>
+
+<!-- 1. 내려받기 -->
+<section class="step" id="s1">
+  <div class="hd"><div class="n">2</div><div><div class="t">안내 창의 <em>인증서 내려받기</em> → 받은 파일 열기</div><div class="s">브라우저 오른쪽 위 다운로드 목록에서 workmgmt-ca.crt 를 클릭</div></div></div>
+  <div class="stage" style="align-items:flex-start;justify-content:flex-start;background:#f3f3f3">
+    <div style="position:absolute;left:0;right:0;top:0;height:46px;background:#fff;border-bottom:1px solid #ddd;display:flex;align-items:center;padding:0 14px;gap:10px">
+      <span style="font-size:18px;color:#666">←  →  ⟳</span>
+      <div style="flex:1;height:32px;border-radius:16px;background:#f1f3f4;display:flex;align-items:center;padding:0 14px;font-size:14px;gap:8px"><span style="color:#c5221f;font-weight:700">⚠ 주의 요함</span><span style="color:#999">|</span><span style="color:#c5221f;text-decoration:line-through">https</span><span>://192.168.0.10:8443</span></div>
+      <svg width="26" height="26" viewBox="0 0 24 24"><path d="M12 3v11m0 0l-4-4m4 4l4-4M5 19h14" stroke="#1a73e8" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>
+      <span style="font-size:20px;color:#666">⋮</span>
+    </div>
+    <div style="position:absolute;right:30px;top:52px;width:380px;background:#fff;border-radius:10px;box-shadow:0 6px 24px #0003;padding:12px 0">
+      <div style="padding:2px 18px 10px;font-weight:700;font-size:15px">최근 다운로드 기록</div>
+      <div id="dl1" style="display:flex;gap:12px;align-items:center;padding:10px 18px;background:#eef3fd">
+        <div style="width:34px;height:40px;border:1.5px solid #888;border-radius:3px;background:#fff;display:flex;align-items:flex-end;justify-content:center;font-size:9px;padding-bottom:3px;color:#a16207;font-weight:700">CRT</div>
+        <div><div style="font-size:15px;font-weight:600">workmgmt-ca.crt</div><div style="font-size:12.5px;color:#666">1.0 KB · 완료</div></div>
+      </div>
+    </div>
+    <div style="position:absolute;left:40px;top:230px;width:380px;background:#fff;border-radius:12px;box-shadow:0 10px 30px #0002;padding:20px 22px;font-size:14px;line-height:1.6">
+      <div style="font-weight:700;font-size:16px;margin-bottom:8px">주소창 '주의 요함' 없애기</div>
+      <div id="dl0" style="background:#1d4ed8;color:#fff;border-radius:8px;padding:10px;text-align:center;font-weight:700">⬇ 인증서 내려받기</div>
+      <div style="color:#666;font-size:12.5px;margin-top:8px">다운로드 목록이 안 보이면 [Ctrl] + [J]</div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. 열기 보안 경고 -->
+<section class="step" id="s2">
+  <div class="hd"><div class="n">3</div><div><div class="t">'열기 - 보안 경고' 창이 뜨면 <em>열기</em></div><div class="s">이 창이 안 뜨고 바로 다음 화면이 나오면 그대로 다음 단계로</div></div></div>
+  <div class="stage">
+    <div class="win" style="width:480px">
+      <div class="tb">열기 - 보안 경고<span class="x">✕</span></div>
+      <div style="padding:16px 18px 6px">
+        <div style="margin-bottom:12px">이 파일을 여시겠습니까?</div>
+        <div style="display:grid;grid-template-columns:70px 1fr;row-gap:5px;padding-left:46px;position:relative">
+          <svg style="position:absolute;left:0;top:0" width="34" height="38" viewBox="0 0 34 38"><rect x="3" y="2" width="26" height="33" fill="#fff" stroke="#888"/><rect x="8" y="9" width="16" height="2" fill="#bbb"/><rect x="8" y="14" width="16" height="2" fill="#bbb"/><circle cx="22" cy="27" r="6" fill="#e0a800"/></svg>
+          <span>이름:</span><span>...\Downloads\workmgmt-ca.crt</span>
+          <span>게시자:</span><span>알 수 없는 게시자</span>
+          <span>유형:</span><span>보안 인증서</span>
+          <span>시작:</span><span>...\Downloads\workmgmt-ca.crt</span>
+        </div>
+        <div class="row" style="justify-content:flex-end;margin:14px 0 10px"><span class="bt def" id="b2">열기(O)</span><span class="bt">취소</span></div>
+        <div style="margin-bottom:8px"><span class="chk on"></span>이 파일을 열기 전에 항상 확인(W)</div>
+        <div style="border-top:1px solid #ccc;padding-top:8px;display:flex;gap:10px;font-size:12px;color:#333">
+          <svg width="26" height="30" viewBox="0 0 26 30"><path d="M13 1l11 4v9c0 8-5 13-11 15C7 27 2 22 2 14V5z" fill="#e0a800"/><text x="13" y="20" font-size="14" text-anchor="middle" fill="#fff" font-weight="700">!</text></svg>
+          <span>인터넷의 파일은 유용할 수 있지만 컴퓨터에 피해를 줄 수도 있습니다. 신뢰할 수 있는 원본의 파일만 여십시오.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. 인증서 창 -->
+<section class="step" id="s3">
+  <div class="hd"><div class="n">4</div><div><div class="t"><em>인증서 설치(I)...</em> 누르기</div><div class="s">'회로팀 업무관리 내부 인증 기관' 인증서가 맞는지 이름만 확인</div></div></div>
+  <div class="stage">
+    <div class="win" style="width:420px;zoom:1">
+      <div class="tb">
+        <svg width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="11" fill="#fff" stroke="#777"/><circle cx="11" cy="10" r="3" fill="#e0a800"/></svg>인증서<span class="x">✕</span></div>
+      <div style="padding:8px 8px 0">
+        <div class="row" style="gap:0;font-size:12.5px"><span style="padding:3px 10px;background:#fff;border:1px solid #d9d9d9;border-bottom:none">일반</span><span style="padding:3px 10px;color:#333">자세히</span><span style="padding:3px 10px;color:#333">인증 경로</span></div>
+        <div style="background:#fff;border:1px solid #d9d9d9;padding:10px">
+          <div style="border:1px solid #c8c8c8;padding:12px;height:300px;position:relative">
+            <div class="row" style="gap:10px;margin-bottom:8px">
+              <svg width="32" height="32" viewBox="0 0 32 32"><rect x="2" y="4" width="26" height="20" fill="#fff" stroke="#777"/><circle cx="21" cy="19" r="6" fill="#e0a800"/><circle cx="25" cy="7" r="6" fill="#d32f2f"/><text x="25" y="11" font-size="10" text-anchor="middle" fill="#fff" font-weight="900">✕</text></svg>
+              <b style="font-size:14px">인증서 정보</b></div>
+            <div style="line-height:1.6;font-size:12.5px">이 CA 루트 인증서는 신뢰할 수 없습니다. 신뢰를 사용하려면 이 인증서를 신뢰할 수 있는 루트 인증 기관 저장소에 설치하십시오.</div>
+            <div style="border-top:1px solid #ccc;margin:12px 0"></div>
+            <div style="line-height:2;font-size:12.5px"><b>발급 대상:</b> 회로팀 업무관리 내부 인증 기관<br><br><b>발급자:</b> 회로팀 업무관리 내부 인증 기관<br><br><b>유효 기간:</b> 2026-11-12 부터 2036-11-10</div>
+          </div>
+          <div class="row" style="justify-content:flex-end;margin-top:10px"><span class="bt" id="b3">인증서 설치(I)...</span><span class="bt">발급자 설명(S)</span></div>
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end;padding:10px 8px"><span class="bt">확인</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. 마법사 시작 -->
+<section class="step" id="s4">
+  <div class="hd"><div class="n">5</div><div><div class="t"><em>현재 사용자</em> 그대로 두고 → <em>다음</em></div><div class="s">'로컬 컴퓨터'는 고르지 않습니다 (관리자 권한 필요 없음)</div></div></div>
+  <div class="stage">
+    <div class="win white" style="width:560px">
+      <div class="tb"><span style="font-size:15px;color:#999">←</span>
+        <svg width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="11" fill="#fff" stroke="#777"/><circle cx="11" cy="10" r="3" fill="#e0a800"/></svg>인증서 가져오기 마법사<span class="x">✕</span></div>
+      <div style="padding:14px 34px 20px;line-height:1.6;font-size:12.5px">
+        <div class="wz-h">인증서 가져오기 마법사 시작</div>
+        <div>이 마법사를 사용하면 인증서, 인증서 신뢰 목록 및 인증서 해지 목록을 디스크에서 인증서 저장소로 복사할 수 있습니다.</div>
+        <div style="margin-top:10px">인증 기관에서 발급한 인증서는 사용자 ID를 확인하고 데이터를 보호하거나 보안 네트워크 연결을 제공하는 데 사용되는 정보를 포함합니다. 인증서 저장소는 인증서를 보관하는 시스템 영역입니다.</div>
+        <div style="margin-top:16px">저장소 위치</div>
+        <div style="padding-left:16px" id="r4"><div class="radio"><i class="on"></i>현재 사용자(C)</div><div class="radio"><i></i>로컬 컴퓨터(L)</div></div>
+        <div style="margin-top:16px">계속하려면 [다음]을 클릭하십시오.</div>
+      </div>
+      <div class="ft" style="background:#f0f0f0"><span class="bt def" id="b4">다음(N)</span><span class="bt">취소</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. 저장소 -->
+<section class="step" id="s5">
+  <div class="hd"><div class="n">6</div><div><div class="t"><em>모든 인증서를 다음 저장소에 저장</em> → <em>찾아보기</em></div><div class="s">위쪽 '자동으로 선택'이 아니라 아래쪽 동그라미를 고릅니다</div></div></div>
+  <div class="stage">
+    <div class="win white" style="width:560px">
+      <div class="tb"><span style="font-size:15px;color:#555">←</span>
+        <svg width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="11" fill="#fff" stroke="#777"/><circle cx="11" cy="10" r="3" fill="#e0a800"/></svg>인증서 가져오기 마법사<span class="x">✕</span></div>
+      <div style="padding:12px 34px 6px;font-size:12.5px;border-bottom:1px solid #e5e5e5"><b>인증서 저장소</b><div style="padding-left:16px;margin-top:2px">인증서 저장소는 인증서를 보관하는 시스템 영역입니다.</div></div>
+      <div style="padding:16px 40px 92px;font-size:12.5px;line-height:1.6">
+        <div>Windows에서 자동으로 인증서 저장소를 선택하거나 사용자가 인증서 위치를 지정할 수 있습니다.</div>
+        <div style="margin-top:12px" class="radio"><i></i>인증서 종류 기준으로 인증서 저장소를 자동으로 선택(U)</div>
+        <div class="radio" id="r5"><i class="on"></i>모든 인증서를 다음 저장소에 저장(P)</div>
+        <div style="padding-left:22px;margin-top:6px">인증서 저장소:</div>
+        <div class="row" style="padding-left:22px"><div class="tbox" style="flex:1"></div><span class="bt" id="b5">찾아보기(R)...</span></div>
+      </div>
+      <div class="ft" style="background:#f0f0f0"><span class="bt def">다음(N)</span><span class="bt">취소</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. 저장소 선택 -->
+<section class="step" id="s6">
+  <div class="hd"><div class="n">7</div><div><div class="t"><em>신뢰할 수 있는 루트 인증 기관</em> → <em>확인</em></div><div class="s">목록 두 번째 줄 · '중간 인증 기관'과 헷갈리지 않게</div></div></div>
+  <div class="stage">
+    <div class="win" style="width:360px">
+      <div class="tb">인증서 저장소 선택<span class="x">✕</span></div>
+      <div style="padding:12px 14px;font-size:12.5px">
+        <div style="margin-bottom:6px">사용할 인증서 저장소를 선택하십시오.(C)</div>
+        <div style="background:#fff;border:1px solid #828790;height:190px;padding:3px 0;line-height:23px" id="l6">
+          <div style="padding-left:6px">📁 개인</div>
+          <div style="padding-left:6px;background:#cce8ff;border:1px dotted #26a0da" id="l6sel">📁 신뢰할 수 있는 루트 인증 기관</div>
+          <div style="padding-left:6px">📁 엔터프라이즈 신뢰</div>
+          <div style="padding-left:6px">📁 중간 인증 기관</div>
+          <div style="padding-left:6px">📁 Active Directory 사용자 개체</div>
+          <div style="padding-left:6px">📁 신뢰할 수 있는 게시자</div>
+          <div style="padding-left:6px">📁 신뢰할 수 없는 인증서</div>
+        </div>
+        <div style="margin-top:10px"><span class="chk"></span>실제 저장소 표시(S)</div>
+        <div class="row" style="justify-content:flex-end;margin-top:12px"><span class="bt def" id="b6">확인</span><span class="bt">취소</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. 다음 -->
+<section class="step" id="s7">
+  <div class="hd"><div class="n">8</div><div><div class="t">칸에 <em>신뢰할 수 있는 루트 인증 기관</em> 확인 → <em>다음</em></div><div class="s">칸이 비어 있으면 6번부터 다시</div></div></div>
+  <div class="stage">
+    <div class="win white" style="width:560px">
+      <div class="tb"><span style="font-size:15px;color:#555">←</span>
+        <svg width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="11" fill="#fff" stroke="#777"/><circle cx="11" cy="10" r="3" fill="#e0a800"/></svg>인증서 가져오기 마법사<span class="x">✕</span></div>
+      <div style="padding:12px 34px 6px;font-size:12.5px;border-bottom:1px solid #e5e5e5"><b>인증서 저장소</b><div style="padding-left:16px;margin-top:2px">인증서 저장소는 인증서를 보관하는 시스템 영역입니다.</div></div>
+      <div style="padding:16px 40px 92px;font-size:12.5px;line-height:1.6">
+        <div>Windows에서 자동으로 인증서 저장소를 선택하거나 사용자가 인증서 위치를 지정할 수 있습니다.</div>
+        <div style="margin-top:12px" class="radio"><i></i>인증서 종류 기준으로 인증서 저장소를 자동으로 선택(U)</div>
+        <div class="radio"><i class="on"></i>모든 인증서를 다음 저장소에 저장(P)</div>
+        <div style="padding-left:22px;margin-top:6px">인증서 저장소:</div>
+        <div class="row" style="padding-left:22px"><div class="tbox" style="flex:1" id="t7">신뢰할 수 있는 루트 인증 기관</div><span class="bt">찾아보기(R)...</span></div>
+      </div>
+      <div class="ft" style="background:#f0f0f0"><span class="bt def" id="b7">다음(N)</span><span class="bt">취소</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 8. 마침 -->
+<section class="step" id="s8">
+  <div class="hd"><div class="n">9</div><div><div class="t"><em>마침</em> 누르기</div><div class="s">'신뢰할 수 있는 루트 인증 기관'으로 되어 있는지 한 번 더 보기</div></div></div>
+  <div class="stage">
+    <div class="win white" style="width:560px">
+      <div class="tb"><span style="font-size:15px;color:#555">←</span>
+        <svg width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="11" fill="#fff" stroke="#777"/><circle cx="11" cy="10" r="3" fill="#e0a800"/></svg>인증서 가져오기 마법사<span class="x">✕</span></div>
+      <div style="padding:14px 34px 60px;font-size:12.5px;line-height:1.6">
+        <div class="wz-h">인증서 가져오기 마법사 완료</div>
+        <div>[마침]을 클릭하면 인증서를 가져옵니다.</div>
+        <div style="margin-top:12px">다음 설정을 지정했습니다:</div>
+        <div style="border:1px solid #aaa;height:110px;margin-top:4px;display:grid;grid-template-columns:200px 1fr;align-content:start;padding:2px 4px;row-gap:2px">
+          <span>사용자가 선택한 인증서 저장소</span><span id="t8">신뢰할 수 있는 루트 인증 기관</span><span>내용</span><span>인증서</span>
+        </div>
+      </div>
+      <div class="ft" style="background:#f0f0f0"><span class="bt def" id="b8">마침(F)</span><span class="bt">취소</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 9. 보안 경고 -->
+<section class="step" id="s9">
+  <div class="hd"><div class="n">10</div><div><div class="t">보안 경고 → <em>예</em></div><div class="s">발급자가 '회로팀 업무관리 내부 인증 기관'이면 [예] · 다른 이름이면 [아니요]</div></div></div>
+  <div class="stage">
+    <div class="win" style="width:520px">
+      <div class="tb">보안 경고<span class="x">✕</span></div>
+      <div style="padding:14px 16px;font-size:12.5px;line-height:1.55;display:flex;gap:14px">
+        <svg width="34" height="32" viewBox="0 0 34 32" style="flex:none"><path d="M17 2L32 30H2z" fill="#f2c200" stroke="#b58e00"/><text x="17" y="26" font-size="17" text-anchor="middle" font-weight="900">!</text></svg>
+        <div>
+          <div>발급자가 다음과 같이 주장하는 CA(인증 기관)로부터 인증서를 설치하려고 합니다.</div>
+          <div style="padding-left:12px;margin:6px 0 2px;display:inline-block" id="t9">회로팀 업무관리 내부 인증 기관</div>
+          <div style="margin-top:8px">인증서가 실제로 "회로팀 업무관리 내부 인증 기관"로부터 온 것인지 확인할 수 없습니다. "회로팀 업무관리 내부 인증 기관"에 연락하여 출처를 확인해야 합니다. 다음 번호가 이 과정에서 도움이 될 것입니다.</div>
+          <div style="margin-top:8px">지문(sha1): <span class="blur">3F2A91C0 7B44E1D2 9A0C55B8 E61F2D73 0C9B84AA</span></div>
+          <div style="margin-top:8px">경고:<br>이 루트 인증서를 설치하면 Windows에서 이 CA가 발급한 모든 인증서를 자동으로 신뢰하게 됩니다. 확인되지 않은 지문을 사용하여 인증서를 설치하면 보안 위험이 발생할 수 있습니다. "예"를 클릭하면 이 위험을 인식하는 것으로 간주됩니다.</div>
+          <div style="margin-top:8px">이 인증서를 설치하시겠습니까?</div>
+          <div class="row" style="justify-content:flex-end;margin-top:12px"><span class="bt def" id="b9">예(Y)</span><span class="bt">아니요(N)</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10. 완료 -->
+<section class="step" id="s10">
+  <div class="hd"><div class="n">11</div><div><div class="t">'가져오기를 완료했습니다' → <em>확인</em></div><div class="s">열려 있는 '인증서' 창도 [확인]으로 닫기</div></div></div>
+  <div class="stage">
+    <div class="win" style="width:320px">
+      <div class="tb">인증서 가져오기 마법사<span class="x">✕</span></div>
+      <div style="padding:22px 18px 18px;font-size:12.5px">
+        <div class="row" style="gap:14px"><svg width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="#1c6dd0"/><text x="16" y="23" font-size="19" text-anchor="middle" fill="#fff" font-weight="700" font-family="serif">i</text></svg>가져오기를 완료했습니다.</div>
+        <div class="row" style="justify-content:flex-end;margin-top:22px"><span class="bt def" id="b10">확인</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 11. 브라우저 다시 열기 -->
+<section class="step" id="s11">
+  <div class="hd"><div class="n">12</div><div><div class="t">크롬 · 엣지 창을 <em>모두 닫고</em> 다시 접속</div><div class="s">주소창 '주의 요함'이 없어지면 끝 · PC마다 한 번만 하면 됩니다</div></div></div>
+  <div class="stage" style="flex-direction:column;gap:22px;background:#f3f4f6">
+    <div style="width:720px">
+      <div style="font-weight:700;color:#b91c1c;margin-bottom:6px;font-size:16px">설치 전</div>
+      <div style="height:46px;border-radius:23px;background:#fff;border:1px solid #ddd;display:flex;align-items:center;padding:0 18px;font-size:17px;gap:10px"><span style="color:#c5221f;font-weight:700">⚠ 주의 요함</span><span style="color:#bbb">|</span><span style="color:#c5221f;text-decoration:line-through">https</span><span style="margin-left:-10px">://192.168.0.10:8443</span></div>
+    </div>
+    <div style="font-size:30px;color:#64748b">▼</div>
+    <div style="width:720px;position:relative">
+      <div style="font-weight:700;color:#15803d;margin-bottom:6px;font-size:16px">설치 후</div>
+      <div style="height:46px;border-radius:23px;background:#fff;border:3px solid #16a34a;display:flex;align-items:center;padding:0 18px;font-size:17px;gap:10px">
+        <svg width="18" height="20" viewBox="0 0 18 20"><rect x="2" y="8" width="14" height="11" rx="2" fill="#5f6368"/><path d="M5 8V6a4 4 0 018 0v2" stroke="#5f6368" stroke-width="2" fill="none"/></svg>
+        <span>192.168.0.10:8443</span></div>
+    </div>
+    <div style="font-size:14px;color:#475569;margin-top:6px">그래도 경고가 남으면: 크롬 · 엣지가 작업 표시줄 오른쪽 아래(트레이)에 남아 있는지 확인 → PC 다시 시작</div>
+  </div>
+</section>
+
+<script>
+// 클릭할 곳 표시: [요소 id, 번호, 꼬리말]
+const MARKS = {
+  s1: [["dl0", "누르기", 1, "r"], ["dl1", "클릭해서 열기", 2]], s2: [["b2", "열기"]], s3: [["b3", "클릭"]], s4: [["r4", "확인", 1, "r"], ["b4", "다음", 2]],
+  s5: [["r5", "선택", 1, "r"], ["b5", "클릭", 2]], s6: [["l6sel", "선택", 1, "r"], ["b6", "확인", 2]],
+  s7: [["t7", "확인", 1], ["b7", "다음", 2]], s8: [["t8", "확인", 1, "r"], ["b8", "마침", 2]], s9: [["t9", "이름 확인", 1, "r"], ["b9", "예", 2]], s10: [["b10", "확인"]]
+};
+for (const [sid, list] of Object.entries(MARKS)) {
+  const sec = document.getElementById(sid), sr = sec.getBoundingClientRect();
+  for (const [eid, label, n, pos] of list) {
+    const r = document.getElementById(eid).getBoundingClientRect(), p = 6;
+    const x = r.left - sr.left - p, y = r.top - sr.top - p, w = r.width + p * 2, hh = r.height + p * 2;
+    const m = document.createElement("div"); m.className = "mark"; Object.assign(m.style, { left: x + "px", top: y + "px", width: w + "px", height: hh + "px" }); sec.append(m);
+    const t = document.createElement("div"); t.className = "tag"; t.textContent = (n ? n + " " : "") + label; sec.append(t);
+    const tr = t.getBoundingClientRect();
+    if (pos === "r") Object.assign(t.style, { left: Math.min(x + w + 10, 900 - tr.width - 6) + "px", top: (y + hh / 2 - tr.height / 2) + "px" });
+    else if (pos === "t") Object.assign(t.style, { left: (x + w / 2 - tr.width / 2) + "px", top: (y - tr.height - 8) + "px" });
+    else Object.assign(t.style, { left: (x + w / 2 - tr.width / 2) + "px", top: (y + hh + 8) + "px" });
+  }
+}
+</script>
+</body></html>

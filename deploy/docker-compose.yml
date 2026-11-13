@@ -1,0 +1,15 @@
+# 업무관리 웹 · 도커(시놀로지 Container Manager 등) 프로젝트용 예시
+# 이 파일 옆에 data · keys 폴더를 만들어 둡니다 (data = DB · 백업, keys = 암호화 열쇠 · 인증서)
+services:
+  workmgmt:
+    image: workmgmt:0.5.5          # tools/mk_image.py 로 만든 이미지 (docker load -i workmgmt-0.5.5.tar)
+    container_name: workmgmt
+    restart: unless-stopped
+    ports:
+      - "8443:8443"                # HTTPS
+      - "8000:8000"                # HTTP → HTTPS 로 넘김
+    environment:
+      - WL_CERT_HOSTS=192.168.0.10 # 접속에 쓰는 서버 주소 (인증서에 들어감) — 실제 주소로 바꾸기
+    volumes:
+      - ./data:/data
+      - ./keys:/keys

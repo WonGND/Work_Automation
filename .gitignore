@@ -1,0 +1,32 @@
+# 의존성 · 빌드 결과
+node_modules/
+*.exe
+*.tar
+*.zip
+workmgmt
+wl_*
+# 빌드 때 만드는 모듈 (python3 tools/mk_guide.py)
+app/src/guide_img.ts
+# 실행 데이터 · 비밀 (절대 올리지 않음)
+데이터/
+비밀키/
+data/
+keys/
+*.db
+*.db-wal
+*.db-shm
+*.pem
+*.key
+계정*.txt
+acc*.txt
+# 실제 팀 데이터에서 뽑은 seed (공개용은 sample/seed.json 만)
+seed.json
+!sample/seed.json
+# 기타
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
