@@ -40,6 +40,15 @@ const roleKo = { member: "팀원", pl: "PL", lead: "팀장", master: "마스터"
 function sel(options, value, attrs = {}) {
   return h("select", attrs, options.map(o => { const [v, t] = Array.isArray(o) ? o : [o, o]; return h("option", { value: v, selected: String(v) === String(value ?? "") }, t); }));
 }
+// 실수 방지: 정해진 낱말을 직접 입력해야 진행
+function typeBox(msg, word) {
+  return new Promise(res => {
+    const inp = h("input", { class: "inp", placeholder: word, style: "width:160px" }); let done = false;
+    const close = modal("한 번 더 확인", h("div", {}, h("p", { class: "pre" }, msg), inp), [{ text: "진행", cls: "pri", fn: () => { if (inp.value.trim() !== word) { toast(`'${word}'를 입력해야 진행합니다`, true); return false; } done = true; res(true); } }]);
+    const ob = new MutationObserver(() => { if (!document.body.contains(inp)) { ob.disconnect(); if (!done) res(false); } }); ob.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => inp.focus(), 50);
+  });
+}
 function modal(title, body, buttons) {
   const bg = h("div", { class: "modal-bg" });
   const close = () => bg.remove();
@@ -58,7 +67,7 @@ function confirmBox(msg) {
 }
 function field(label, el, full) { return [h("label", {}, label), full ? h("div", { class: "full" }, el) : el]; }
 const modelsFor = part => M.models.filter(m => m.active && (!part || m.part === part));
-const assignable = () => M.users.filter(u => u.active && u.role !== "lead");
+const assignable = () => M.users.filter(u => u.active && !u.gone && u.role !== "lead");
 const isPLUser = id => M.users.find(u => u.id === id)?.role === "pl";
 // 이름 "홍길동 책임" → 이름은 줄바꿈 없이, 직급은 작게
 const nameTag = full => { if (!full) return ""; const [n, ...r] = String(full).split(" "); return h("span", { class: "nm" }, h("b", {}, n), r.length ? h("small", {}, " " + r.join(" ")) : ""); };
@@ -287,7 +296,7 @@ async function boot(forcePw) {
 }
 // ── 알림 (우상단 🔔) ──
 function setBell(n) { const b = $("#bellN"); b.hidden = !n; b.textContent = n > 99 ? "99+" : n; }
-const NK = { 업무: "📋", 이슈: "⚠", 요청: "✉", 버전: "⬆", 계정: "🔑" };
+const NK = { 업무: "📋", 이슈: "⚠", 요청: "✉", 버전: "⬆", 계정: "🔑", 미입력: "⏰" };
 async function openBell() {
   const pn = $("#bellPanel");
   if (!pn.hidden) { pn.hidden = true; return; }
@@ -301,7 +310,21 @@ async function openBell() {
 }
 $("#btnBell").addEventListener("click", e => { e.stopPropagation(); openBell().catch(er => toast(er.message, true)); });
 document.addEventListener("click", e => { const pn = $("#bellPanel"); if (!pn.hidden && !e.target.closest(".bell-wrap")) pn.hidden = true; });
-setInterval(async () => { if (!M || document.hidden) return; try { const d = await api("GET", "/api/notifs"); setBell(d.unread); } catch {} }, 60000);
+// 1분마다: 알림 수 + 다른 사람이 바꾼 공통 정보(계정 · 모델 · 이슈 담당 …) 반영
+//  - 바뀌었으면 기준 정보(M)를 조용히 다시 읽음 → 다음에 여는 화면 · 창부터 새 값
+//  - 지금 화면은 입력 중이 아니고 2분 넘게 손대지 않았을 때만 다시 그림 (스크롤 위치 유지)
+let knownRev = null, needRedraw = false, lastTouch = Date.now();
+for (const ev of ["keydown", "mousedown", "wheel", "touchstart"]) document.addEventListener(ev, () => { lastTouch = Date.now(); }, { passive: true, capture: true });
+const busy = () => !!document.querySelector(".modal-bg") || ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName) || Date.now() - lastTouch < 120000;
+setInterval(async () => {
+  if (!M || document.hidden || M.user.must_change) return;
+  try {
+    const d = await api("GET", "/api/notifs"); setBell(d.unread);
+    if (knownRev === null) knownRev = d.rev;
+    else if (d.rev !== knownRev) { knownRev = d.rev; const role = M.user.role, part = M.user.part; M = await api("GET", "/api/meta"); if (M.user.role !== role || M.user.part !== part) buildNav(); needRedraw = true; }
+    if (needRedraw && !busy()) { needRedraw = false; const y = window.scrollY; await route(); requestAnimationFrame(() => window.scrollTo(0, y)); }
+  } catch {}
+}, 60000);
 function buildNav() {
   const P = M.perms, items = [];
   if (P.sheet) items.push(["#/me", "내 업무"], ["#/myissues", "내 이슈"]);
@@ -854,7 +877,7 @@ async function pageRequests() {
 async function pageAssign() {
   const list = await api("GET", "/api/assign");
   const part = M.perms.admin ? "" : M.perms.plPart;
-  const people = M.users.filter(u => u.active && u.role !== "lead" && (!part || u.part === part));
+  const people = M.users.filter(u => u.active && !u.gone && u.role !== "lead" && (!part || u.part === part));
   const title = h("input", { class: "inp", placeholder: "업무명 (예: B모델 EMC 대책 회로 검토)" });
   const model = sel([["", "공통 (모델 없음)"], ...modelsFor(part).map(m => [m.id, `${m.name} (${m.part} · ${m.phase || "-"})`])], "", { class: "inp" });
   const st = dateInput(M.today), tg = dateInput("");
@@ -956,8 +979,12 @@ async function pageSummary() {
 // ── 사람별 ──
 async function pagePeople(uid) {
   if (uid) return pageMe(uid, M.user.id !== uid);
-  const list = M.users.filter(u => u.role !== "lead" && u.active);
-  app().replaceChildren(h("h1", {}, "사람별"), h("div", { class: "cards" }, list.map(u => h("a", { class: "card", href: `#/people/${u.id}`, style: "text-decoration:none;color:inherit" }, h("b", {}, u.name), h("div", { class: "muted small" }, `${u.part} · ${roleKo[u.role]}`)))));
+  const list = M.users.filter(u => u.role !== "lead" && u.active && !u.gone);
+  const parts = [...M.parts.filter(p => list.some(u => u.part === p)), ...(list.some(u => !M.parts.includes(u.part)) ? [""] : [])];
+  const card = u => h("a", { class: "card person", href: `#/people/${u.id}` }, h("b", {}, u.name), h("div", { class: "muted small" }, roleKo[u.role] + (u.joined && u.joined > M.today ? ` · ${u.joined} 입사` : "")));
+  app().replaceChildren(h("h1", {}, "사람별", h("span", { class: "sub" }, `${list.length}명`)),
+    h("div", { class: "part-cols" }, parts.map(p => { const us = list.filter(u => p ? u.part === p : !M.parts.includes(u.part));
+      return h("div", { class: "part-col" }, h("div", { class: "part-hd" }, p || "파트 없음", h("span", { class: "muted small" }, ` ${us.length}명`)), ...us.map(card)); })));
 }
 
 // ── 기준정보 ──
@@ -1032,10 +1059,10 @@ async function pageAdmin() {
   const tab = sessionStorage.getItem("atab") || "u";
   const T = (k, t) => h("button", { class: tab === k ? "on" : "", onclick: () => { sessionStorage.setItem("atab", k); pageAdmin(); } }, t);
   const body = h("div");
-  app().replaceChildren(h("h1", {}, "관리"), h("div", { class: "tabs" }, T("u", "계정"), T("imp", "엑셀 가져오기"), T("mail", "메일 설정"), T("b", "백업"), T("a", "변경 기록")), body);
-  if (tab === "imp") {
+  app().replaceChildren(h("h1", {}, "관리"), h("div", { class: "tabs" }, T("u", "계정"), M.perms.master ? T("imp", "엑셀 가져오기") : "", T("mail", "메일 설정"), T("b", "백업"), T("a", "변경 기록")), body);
+  if (tab === "imp" && M.perms.master) {
     const f = h("input", { type: "file", accept: ".json,application/json" });
-    const fromI = dateInput(""), toI = dateInput("");
+    const fromI = dateInput(""), toI = dateInput(""), webI = dateInput(M.settings.web_start || "2026-11-16");
     const info = h("div"), out = h("div");
     let seed = null;
     f.addEventListener("change", async () => {
@@ -1053,14 +1080,18 @@ async function pageAdmin() {
       h("div", { class: "small", style: "margin-top:6px" }, `새 계정 ${r.users} · 업무 새로 ${r.tasksNew} / 고침 ${r.tasksUpd} · 엑셀에서 없어져 숨김 ${r.hidden} · 기간 안 시간 ${r.hoursSet}칸 엑셀 값으로 · 이슈 새로 ${r.issuesNew} / 고침 ${r.issuesUpd} · 모델 추가 ${r.models} · 휴직 추가 ${r.leaves}`),
       r.renamed.length ? h("div", { class: "small", style: "margin-top:4px" }, "업무명이 바뀐 행 (같은 업무로 맞춤): " + r.renamed.slice(0, 15).join(" / ")) : "",
       r.issuesHidden.length ? h("div", { class: "small", style: "margin-top:4px" }, "엑셀 이슈 정리에서 없어져 숨긴 이슈 (기록은 남음): " + r.issuesHidden.join(" / ")) : "",
+      r.webKeptHours || r.webKeptTasks?.length || r.webKeptIssues?.length ? h("div", { class: "small", style: "margin-top:4px" }, `웹 우선 (${r.webStart}~): 웹에 이미 있어 그대로 둔 시간 ${r.webKeptHours}칸` +
+        (r.webKeptTasks.length ? ` · 웹에서 고친 업무 ${r.webKeptTasks.length}개 (${r.webKeptTasks.slice(0, 8).join(" / ")})` : "") + (r.webKeptIssues.length ? ` · 웹에서 고친 이슈 ${r.webKeptIssues.length}개 (${r.webKeptIssues.slice(0, 8).join(" / ")})` : "")) : "",
       r.skipped.length ? h("div", { class: "small err" }, "건너뜀: " + r.skipped.slice(0, 10).join(" / ")) : ""));
     const go = async dry => {
       if (!seed) return toast("먼저 파일을 고르세요", true);
       if (!dry && !(await confirmBox(`${fromI.value} ~ ${toI.value} 기간의 시간을 엑셀 값으로 맞추고, 업무 · 이슈 내용을 엑셀대로 고치거나 추가합니다.\n기간 밖 시간, 웹에서 만든 업무 · 이슈, 계정 · 비밀번호는 그대로입니다.\n시작 전에 자동 백업을 만듭니다.`))) return;
-      try { const r = await api("POST", "/api/admin/import", { seed, from: fromI.value, to: toI.value, dry }); show(r, dry); if (!dry) toast("가져왔습니다"); } catch (e) { toast(e.message, true); }
+      if (!dry && !(await typeBox("엑셀 병행은 11/16에 끝났습니다. 정말 가져오려면 아래 칸에 '가져오기'를 입력하세요.", "가져오기"))) return;
+      try { const r = await api("POST", "/api/admin/import", { seed, from: fromI.value, to: toI.value, dry, web_start: webI.value }); show(r, dry); if (!dry) { toast("가져왔습니다"); M = await api("GET", "/api/meta"); } } catch (e) { toast(e.message, true); }
     };
     body.append(h("div", { class: "help" }, "엑셀(팀장 파일)에서 만든 가져오기 파일(seed.json)로 웹 데이터를 엑셀에 맞춥니다. 파일을 고르면 들어 있는 날짜 범위가 기간에 자동으로 들어갑니다. 기간을 줄이면 그 날짜의 시간만 엑셀 값으로 바뀝니다 (업무 · 이슈 내용과 새 이슈는 기간과 상관없이 반영)."),
-      h("div", { class: "card", style: "max-width:760px" }, h("div", { class: "form" }, ...field("가져오기 파일", f), ...field("반영할 기간", h("div", { class: "row" }, fromI, h("span", { class: "muted" }, "~"), toI))), info,
+      h("div", { class: "card", style: "max-width:760px" }, h("div", { class: "form" }, ...field("가져오기 파일", f), ...field("반영할 기간", h("div", { class: "row" }, fromI, h("span", { class: "muted" }, "~"), toI)),
+          ...field("웹 기준 시작일", h("div", { class: "row" }, webI, h("span", { class: "muted small" }, "이날부터는 웹 우선: 웹에 있는 시간은 그대로, 웹에 없을 때만 엑셀 값 · 이날 이후 웹에서 고친 업무 · 이슈 · 담당은 덮어쓰지 않음")))), info,
         h("div", { class: "row", style: "margin-top:12px" }, h("button", { class: "btn", onclick: () => go(true) }, "미리보기"), h("button", { class: "btn pri", onclick: () => go(false) }, "가져오기"))), out);
   }
   if (tab === "mail") {
@@ -1089,14 +1120,18 @@ async function pageAdmin() {
       const name = h("input", { class: "mini-in", value: u.name, style: "width:110px" });
       const act = h("input", { type: "checkbox", checked: !!u.active });
       const email = h("input", { class: "mini-in", value: u.email || "", style: "width:190px", placeholder: "회사 메일" });
-      return h("tr", {}, h("td", {}, u.login, !u.has_pw ? [" ", badge("warn", "비밀번호 없음")] : u.must_change ? [" ", badge("", "처음 로그인 전")] : ""), h("td", {}, name), h("td", {}, title), h("td", {}, part), h("td", {}, role), h("td", {}, email), h("td", { class: "c" }, act),
-        h("td", {}, h("button", { class: "btn sm", onclick: async () => { try { await api("PUT", `/api/admin/users/${u.id}`, { name: name.value, title: title.value, part: part.value, role: role.value, active: act.checked, email: email.value.trim() }); toast("저장했습니다"); M = await api("GET", "/api/meta"); } catch (e) { toast(e.message, true); } } }, "저장"), " ",
+      const joined = dateInput(u.joined || ""), left = dateInput(u.left_on || "");
+      return h("tr", { class: u.gone ? "muted" : "" }, h("td", {}, u.login, u.gone ? [" ", badge("done", "퇴사")] : !u.has_pw ? [" ", badge("warn", "비밀번호 없음")] : u.must_change ? [" ", badge("", "처음 로그인 전")] : ""), h("td", {}, name), h("td", {}, title), h("td", {}, part), h("td", {}, role), h("td", {}, email), h("td", {}, joined), h("td", {}, left), h("td", { class: "c" }, act),
+        h("td", { class: "nowrap" }, h("button", { class: "btn sm", onclick: async () => { try {
+          if (left.value && left.value !== (u.left_on || "") && !(await confirmBox(`${u.name}: 퇴사일 ${left.value}\n다음 날부터 로그인이 막히고 업무로드 · 사람별 · 담당 고르기 목록에서 빠집니다. 입력한 기록은 그대로 남습니다.`))) return;
+          await api("PUT", `/api/admin/users/${u.id}`, { name: name.value, title: title.value, part: part.value, role: role.value, active: act.checked, email: email.value.trim(), joined: joined.value, left_on: left.value }); toast("저장했습니다"); M = await api("GET", "/api/meta"); pageAdmin(); } catch (e) { toast(e.message, true); } } }, "저장"), " ",
           h("button", { class: "btn sm", onclick: async () => { if (u.has_pw && !(await confirmBox(`${u.name} 비밀번호를 초기화할까요?`))) return; try { const r = await api("POST", `/api/admin/users/${u.id}/reset`, {}); showTemp(u.name, r.temp); pageAdmin(); } catch (e) { toast(e.message, true); } } }, u.has_pw ? "비밀번호 초기화" : "처음 비밀번호 만들기")));
     });
-    const nl = h("input", { class: "inp", placeholder: "아이디 (예: 홍길동)" }), nn = h("input", { class: "inp", placeholder: "이름 (예: 홍길동 선임)" }), nt = h("input", { class: "inp", placeholder: "직급" }), np = sel(["", ...M.parts], ""), nr = sel([["member", "팀원"], ["pl", "PL"], ["lead", "팀장"], ["master", "마스터"]], "member");
-    body.append(h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["아이디", "이름", "직급", "파트", "권한", "회사 메일", "사용", ""].map(x => h("th", {}, x)))), h("tbody", {}, rows))),
-      h("h2", {}, "계정 추가"), h("div", { class: "row" }, nl, nn, nt, np, nr, h("button", { class: "btn pri", onclick: async () => { try { const r = await api("POST", "/api/admin/users", { login: nl.value, name: nn.value, title: nt.value, part: np.value, role: nr.value }); showTemp(nn.value, r.temp); pageAdmin(); } catch (e) { toast(e.message, true); } } }, "추가")),
-      h("div", { class: "help" }, "PL = 그 파트 모델의 이슈를 등록 · 관리 · 업무 지정 · 팀장 = 모든 화면 (개인 업무 화면 없음) · 마스터 = 팀장과 같은 권한 + 본인 업무 화면. 퇴사자는 '사용'을 끕니다 (기록은 남음)."));
+    const nl = h("input", { class: "inp", style: "width:150px", placeholder: "아이디 (예: 홍길동)" }), nn = h("input", { class: "inp", style: "width:180px", placeholder: "이름 (예: 홍길동 선임)" }), nt = h("input", { class: "inp", style: "width:90px", placeholder: "직급" }), np = sel(["", ...M.parts], ""), nr = sel([["member", "팀원"], ["pl", "PL"], ["lead", "팀장"], ["master", "마스터"]], "member"), nj = dateInput(M.today);
+    body.append(h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["아이디", "이름", "직급", "파트", "권한", "회사 메일", "입사일", "퇴사일", "사용", ""].map(x => h("th", {}, x)))), h("tbody", {}, rows))),
+      h("h2", {}, "계정 추가 (입사)"), h("div", { class: "row" }, nl, nn, nt, np, nr, h("span", { class: "muted small" }, "입사일"), nj, h("button", { class: "btn pri", onclick: async () => { try { const r = await api("POST", "/api/admin/users", { login: nl.value, name: nn.value, title: nt.value, part: np.value, role: nr.value, joined: nj.value }); showTemp(nn.value, r.temp); M = await api("GET", "/api/meta"); pageAdmin(); } catch (e) { toast(e.message, true); } } }, "추가")),
+      h("div", { class: "help" }, "PL = 그 파트 모델의 이슈를 등록 · 관리 · 업무 지정 · 팀장 = 모든 화면 (개인 업무 화면 없음) · 마스터 = 팀장과 같은 권한 + 본인 업무 화면 (마스터는 여러 명 가능 · 마스터만 다른 사람에게 줄 수 있음).",
+        h("br"), "입사: 계정 추가 때 입사일을 넣으면 그 전 날짜는 기준 시간 · 미입력에서 빠집니다. 퇴사: 퇴사일을 넣고 저장하면 다음 날부터 로그인이 막히고 업무로드 · 사람별 · 담당 고르기 목록에서 빠집니다 (퇴사 전 기간을 고르면 그 기간 집계에는 들어감 · 기록은 그대로)."));
   }
   if (tab === "b") {
     const b = await api("GET", "/api/admin/backups");

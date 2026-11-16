@@ -4,6 +4,7 @@ import { enc, randCode, tempPw } from "./secret";
 import { sendMail, mailReady } from "./mail";
 import { ctx, personStats, periodRange, today, addDays, scheduleState, num, isWorkday, dow, weightOf } from "./calc";
 import { ensureFixedRows, importWork } from "./seed";
+import { missReminder } from "./remind";
 import { join } from "node:path";
 import { existsSync, readdirSync, unlinkSync } from "node:fs";
 
@@ -13,6 +14,9 @@ const NOPERM = "입력 권한이 없습니다";
 
 export type User = { id: number; login: string; name: string; title: string; part: string; role: string; must_change: number; active: number };
 const isAdmin = (u: User) => u.role === "lead" || u.role === "master";
+// 퇴사: 퇴사일 다음 날부터 (기록은 남음)
+const gone = (u: any) => !!u?.left_on && u.left_on < today();
+const ALIVE = () => `(IFNULL(left_on,'')='' OR left_on>='${today()}')`;
 const hasSheet = (u: User) => u.role !== "lead";   // 팀장 계정은 개인 업무 화면 없음
 const isPL = (u: User) => u.role === "pl";
 const plPart = (u: User) => (isPL(u) ? u.part : "");
@@ -38,15 +42,15 @@ export function currentUser(req: Request): User | null {
   const t = cookieOf(req, "wl_sid"); if (!t) return null;
   const s = q1("SELECT user_id, expires FROM sessions WHERE token=?", t);
   if (!s || s.expires < new Date().toISOString()) return null;
-  const u = q1<User>("SELECT id,login,name,title,part,role,must_change,active FROM users WHERE id=?", s.user_id);
-  if (!u || !u.active) return null;
+  const u = q1<User>("SELECT id,login,name,title,part,role,must_change,active,left_on FROM users WHERE id=?", s.user_id);
+  if (!u || !u.active || gone(u)) return null;
   run("UPDATE sessions SET expires=? WHERE token=?", new Date(Date.now() + 12 * 3600e3).toISOString(), t);
   return u;
 }
 
 // ── 공통 데이터 ──
 function meta(u: User) {
-  const users = q(`SELECT id,login,name,title,part,role,active,ord${isAdmin(u) ? ",email, (pw<>'') has_pw, must_change" : ""} FROM users ORDER BY ord,id`);
+  const users = q(`SELECT id,login,name,title,part,role,active,ord,joined,left_on${isAdmin(u) ? ",email, (pw<>'') has_pw, must_change" : ""} FROM users ORDER BY ord,id`).map((x: any) => ({ ...x, gone: gone(x) }));
   return {
     user: u, today: today(),
     perms: { admin: isAdmin(u), sheet: hasSheet(u), pl: isPL(u), plPart: plPart(u), master: u.role === "master", std: isAdmin(u) || isPL(u), assign: isAdmin(u) || isPL(u) },
@@ -93,7 +97,7 @@ function taskOut(t: any) {
 }
 // 요청을 보낼 수 있는 사람: 마스터 · 팀장 · 우리 파트 PL (나 제외)
 function reqTargets(me: User) {
-  return q("SELECT * FROM users WHERE active=1 AND id<>? AND (role IN ('master','lead') OR (role='pl' AND part=?)) ORDER BY CASE role WHEN 'pl' THEN 1 WHEN 'master' THEN 2 ELSE 3 END, ord", me.id, me.part || "");
+  return q(`SELECT * FROM users WHERE active=1 AND ${ALIVE()} AND id<>? AND (role IN ('master','lead') OR (role='pl' AND part=?)) ORDER BY CASE role WHEN 'pl' THEN 1 WHEN 'master' THEN 2 ELSE 3 END, ord`, me.id, me.part || "");
 }
 function reqOut(r: any) {
   return { ...r, from_name: q1("SELECT name FROM users WHERE id=?", r.from_id)?.name || "", to_name: q1("SELECT name FROM users WHERE id=?", r.to_id)?.name || "", to_role: q1("SELECT role FROM users WHERE id=?", r.to_id)?.role || "" };
@@ -102,7 +106,7 @@ export function setupNeeded() { return !q1("SELECT 1 FROM users WHERE active=1 A
 // 업무를 고칠 수 있는 사람: 본인 · 마스터 · 그 업무를 지정해 준 PL
 function canEditTask(me: User, t: any) { return t.user_id === me.id || me.role === "master" || (t.assigned_by && t.assigned_by === me.id); }
 // PL이 업무를 지정할 수 있는 사람: 우리 파트 (팀장 · 마스터는 모두)
-function canAssignTo(me: User, u: any) { return u && u.active && u.role !== "lead" && (isAdmin(me) || (isPL(me) && u.part === me.part)); }
+function canAssignTo(me: User, u: any) { return u && u.active && !gone(u) && u.role !== "lead" && (isAdmin(me) || (isPL(me) && u.part === me.part)); }
 function checkTaskInput(b: any, isNew: boolean) {
   const out: any = {};
   if (isNew || "kind" in b) { if (!["통상", "기타", "휴가", "조퇴"].includes(b.kind)) err(400, "구분은 통상 · 기타 · 휴가 · 조퇴 중에서 고릅니다 (이슈는 PL이 등록)"); out.kind = b.kind; }
@@ -185,6 +189,7 @@ function setMembers(issueId: number, members: any[], confirmPl = false) {
     if (!["정", "부1", "부2"].includes(m.role)) err(400, "담당은 정 · 부1 · 부2");
     if (roles.has(m.role)) err(400, `${m.role} 담당이 두 번 지정됐습니다`);
     const u = q1<User>("SELECT * FROM users WHERE id=?", Number(m.user_id)); if (!u || !u.active) err(400, "없는 사용자입니다");
+    if (gone(u)) err(400, `${u!.name}: 퇴사한 사람은 담당이 될 수 없습니다`);
     if (u!.role === "lead") err(400, `${u!.name}: 팀장 계정은 이슈 담당이 될 수 없습니다`);
     if (u!.role === "pl" && !confirmPl) err(409, `CONFIRM_PL:${m.role}이(가) PL입니다 (${u!.name}). 정말 입력하시겠습니까?`);
     if (usersSeen.has(u!.id)) err(400, `${u!.name} 이 두 번 지정됐습니다`);
@@ -207,7 +212,7 @@ function setMembers(issueId: number, members: any[], confirmPl = false) {
 // ── 업무로드 ──
 function dashboard(from: string, to: string) {
   const c = ctx();
-  const users = q("SELECT * FROM users WHERE active=1 AND role<>'lead' ORDER BY ord,id");
+  const users = q("SELECT * FROM users WHERE active=1 AND role<>'lead' AND (IFNULL(joined,'')='' OR joined<=?) AND (IFNULL(left_on,'')='' OR left_on>=?) ORDER BY ord,id", to, from);
   const people = users.map((u: any) => ({ ...personStats(c, u.id, from, to), name: u.name, part: u.part, role: u.role }));
   const agg = (list: any[]) => {
     const base = list.reduce((a, p) => a + p.base, 0), input = list.reduce((a, p) => a + p.input, 0), w = list.reduce((a, p) => a + p.weighted, 0);
@@ -260,6 +265,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
   if (p === "/api/login" && m === "POST") {
     const login = str(body.login, 50); const u = q1("SELECT * FROM users WHERE login=?", login);
     if (!u || !u.active) { await Bun.sleep(400); err(401, "아이디 또는 비밀번호가 맞지 않습니다"); }
+    if (gone(u)) { await Bun.sleep(400); err(403, "퇴사 처리된 계정입니다"); }
     if (u.locked_until && u.locked_until > new Date().toISOString()) err(429, "비밀번호를 여러 번 틀려 잠시 잠겼습니다. 1분 뒤 다시 시도하세요");
     if (!u.pw) { await Bun.sleep(400); err(403, "아직 비밀번호가 없는 계정입니다. 팀장 · 마스터에게 '비밀번호 초기화'를 요청해 처음 비밀번호를 받으세요."); }
     if (!(await Bun.password.verify(String(body.pw || ""), u.pw))) {
@@ -486,7 +492,9 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     return json({ ok: true });
   }
   if (p === "/api/notifs" && m === "GET") {
-    return json({ unread: q1("SELECT COUNT(*) n FROM notifs WHERE user_id=? AND read=0", me.id)?.n || 0, list: q("SELECT * FROM notifs WHERE user_id=? ORDER BY id DESC LIMIT 60", me.id) });
+    // rev: 모두가 같이 보는 정보(계정 · 모델 · 기준 · 이슈 · 지정)가 마지막으로 바뀐 번호 → 화면이 이 값이 바뀌면 다시 읽음
+    const rev = q1(`SELECT IFNULL(MAX(id),0) n FROM audit WHERE action IN ('계정 수정','계정 추가','공휴일 추가','공휴일 삭제','기준값 수정','기준정보 배율','등급 추가','업무 분류 추가','업무 지정','엑셀 가져오기','seed 추가 반영','이슈 등록','이슈 수정','이슈 삭제(숨김)','이슈 되살리기','판정 문구 수정','휴직 수정','휴직 추가','모델 추가','모델 수정')`)?.n || 0;
+    return json({ rev, unread: q1("SELECT COUNT(*) n FROM notifs WHERE user_id=? AND read=0", me.id)?.n || 0, list: q("SELECT * FROM notifs WHERE user_id=? ORDER BY id DESC LIMIT 60", me.id) });
   }
   if (p === "/api/notifs/read" && m === "POST") {
     if (body.all) run("UPDATE notifs SET read=1 WHERE user_id=?", me.id); else run("UPDATE notifs SET read=1 WHERE user_id=? AND id=?", me.id, Number(body.id));
@@ -686,15 +694,18 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       if (!["member", "pl", "lead", "master"].includes(body.role)) err(400, "권한 오류");
       if (body.role === "master" && me.role !== "master") err(403, "마스터 계정은 마스터만 만들 수 있습니다");
       if (q1("SELECT 1 FROM users WHERE login=?", login)) err(400, "이미 있는 아이디입니다");
-      const pw = tempPw();
-      const r = run("INSERT INTO users(login,name,title,part,role,pw,must_change,ord) VALUES(?,?,?,?,?,?,1,(SELECT IFNULL(MAX(ord),0)+1 FROM users))", login, name, str(body.title, 20), str(body.part, 30), body.role, await Bun.password.hash(pw));
+      const pw = tempPw(); const joined = dOrNull(body.joined);
+      const r = run("INSERT INTO users(login,name,title,part,role,pw,must_change,ord,joined) VALUES(?,?,?,?,?,?,1,(SELECT IFNULL(MAX(ord),0)+1 FROM users),?)", login, name, str(body.title, 20), str(body.part, 30), body.role, await Bun.password.hash(pw), joined);
       if (body.role !== "lead") await ensureFixedRows(Number(r.lastInsertRowid));
-      audit(me.id, "계정 추가", login, { name, role: body.role, part: body.part }); return json({ ok: true, temp: pw });
+      audit(me.id, "계정 추가", login, { name, role: body.role, part: body.part, 입사일: joined }); return json({ ok: true, temp: pw });
     }
     // 엑셀 → 웹 전환 (기준일까지 엑셀 값) · dry=true 면 미리보기만
+    if (what === "remind" && m === "POST") { if (me.role !== "master") err(403, "마스터만 쓸 수 있습니다"); return json({ ok: true, ...missReminder(true) }); }
     if (what === "import" && m === "POST") {
+      if (me.role !== "master") err(403, "엑셀 가져오기는 마스터만 할 수 있습니다");
       if (!body.seed?.tasks || !body.seed?.issues) err(400, "가져오기 파일(seed.json) 형식이 아닙니다");
-      try { const r = await importWork(body.seed, str(body.from || "2000-01-01", 10), str(body.to || body.cutoff, 10), !!body.dry); return json({ ok: true, dry: !!body.dry, ...r }); }
+      if (body.web_start) { const w = dOrNull(body.web_start); if (w && !body.dry) setSetting("web_start", w); }
+      try { const r = await importWork(body.seed, str(body.from || "2000-01-01", 10), str(body.to || body.cutoff, 10), !!body.dry, body.web_start ? String(body.web_start) : undefined); return json({ ok: true, dry: !!body.dry, ...r }); }
       catch (e: any) { err(400, "가져오기 실패: " + String(e?.message || e).slice(0, 200)); }
     }
     mt = what.match(/^users\/(\d+)(\/reset)?$/);
@@ -713,7 +724,12 @@ export async function handle(req: Request, url: URL): Promise<Response> {
         if (tu.id === me.id && role !== tu.role) err(400, "자기 권한은 바꿀 수 없습니다");
         if (role === "pl" && q1("SELECT 1 FROM issue_members m JOIN issues i ON i.id=m.issue_id WHERE m.user_id=? AND i.hidden=0 AND i.done IS NULL AND i.stage<6", tu.id))
           audit(me.id, "알림", tu.login, "PL로 바꾼 사람이 진행 중 이슈 담당으로 남아 있음");
-        run("UPDATE users SET name=?, title=?, part=?, role=?, active=?, email=? WHERE id=?", str(body.name ?? tu.name, 40), str(body.title ?? tu.title, 20), str(body.part ?? tu.part, 30), role, body.active === undefined ? tu.active : body.active ? 1 : 0, str(body.email ?? tu.email ?? "", 120).toLowerCase(), tu.id);
+        const joined = body.joined === undefined ? tu.joined : dOrNull(body.joined), left = body.left_on === undefined ? tu.left_on : dOrNull(body.left_on);
+        if (joined && left && left < joined) err(400, "퇴사일이 입사일보다 빠릅니다");
+        if (left && tu.id === me.id) err(400, "자기 계정은 퇴사 처리할 수 없습니다");
+        if (left && role === "master" && !q1(`SELECT 1 FROM users WHERE role='master' AND active=1 AND id<>? AND (IFNULL(left_on,'')='' OR left_on>=?)`, tu.id, today())) err(400, "마지막 마스터는 퇴사 처리할 수 없습니다 (먼저 다른 사람에게 마스터를 주세요)");
+        run("UPDATE users SET name=?, title=?, part=?, role=?, active=?, email=?, joined=?, left_on=? WHERE id=?", str(body.name ?? tu.name, 40), str(body.title ?? tu.title, 20), str(body.part ?? tu.part, 30), role, body.active === undefined ? tu.active : body.active ? 1 : 0, str(body.email ?? tu.email ?? "", 120).toLowerCase(), joined, left, tu.id);
+        if (left && left < today()) run("DELETE FROM sessions WHERE user_id=?", tu.id);
         if (role !== "lead") await ensureFixedRows(tu.id);
         if (body.active === false || body.active === 0) run("DELETE FROM sessions WHERE user_id=?", tu.id);
         audit(me.id, "계정 수정", tu.login, body); return json({ ok: true });

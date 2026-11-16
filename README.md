@@ -15,6 +15,7 @@
 - **알림 · 요청**: 🔔 알림, PL · 팀장에게 요청 보내기
 - **엑셀 가져오기**: 기존 엑셀에서 뽑은 seed를 기간을 골라 반영(미리보기 · 되돌릴 수 있는 자동 백업 · 여러 번 해도 같은 결과)
 - **화면**: 화면 A · B · C 세 가지 모양 + 각각 다크 모드, 사람별 저장
+- **입사 · 퇴사**: 입사일 · 퇴사일 (퇴사 다음 날부터 로그인 막힘 · 목록에서 숨김 · 기록은 남음), 미입력 알림(전 근무일 · 주간 요약)
 - **운영**: 매일 자동 백업(90개 보관), 변경 기록, 메일로 비밀번호 찾기(SMTP), 내부 인증 기관으로 HTTPS
 
 ## 구조
@@ -26,7 +27,8 @@ app/
     api.ts      REST API (로그인 · 업무 · 시간 · 이슈 · 관리)
     db.ts       SQLite(WAL) 스키마 · 마이그레이션 · 백업
     calc.ts     근무 시간율 · 업무 로드 · 판정 계산
-    seed.ts     처음 설정 · 엑셀 가져오기(기간 반영)
+    seed.ts     처음 설정 · 엑셀 가져오기(기간 반영 · 웹 우선)
+    remind.ts   미입력 알림
     selfsign.ts 내부 인증 기관(CA) · 서버 인증서 생성 (외부 라이브러리 없이 DER 직접 작성)
     secret.ts   메일 비밀번호 암호화(AES-256-GCM) · 임시 비밀번호
     mail.ts     SMTP 발송
@@ -66,6 +68,8 @@ HTTPS(내부 인증서)로 실행:
 python3 tools/bootstrap.py http://127.0.0.1:8000 <서버 로그 파일> acc.txt   # 처음 설정 · 계정 (10건)
 python3 tools/api_test.py   http://127.0.0.1:8000 acc.txt                     # API 권한 · 계산 · 입력 검사 (137건)
 python3 tools/import_test.py http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 엑셀 가져오기 (19건)
+python3 tools/v056_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 웹 우선 가져오기 · 입사 · 퇴사 (24건)
+python3 tools/v057_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 미입력 알림 · 화면 갱신 번호 · 가져오기 권한 (14건)
 python3 tools/mail_test.py  http://127.0.0.1:8000 <비밀번호> 홍길동           # 메일 · 비밀번호 찾기 (15건, aiosmtpd 필요)
 ```
 
@@ -75,10 +79,10 @@ python3 tools/mail_test.py  http://127.0.0.1:8000 <비밀번호> 홍길동      
 
 ```bash
 cd app && bun build --compile --target=bun-linux-x64-baseline src/server.ts --outfile ../wl_base && cd ..
-python3 tools/mk_image.py wl_base sample/seed.json workmgmt-0.5.5.tar workmgmt:0.5.5
+python3 tools/mk_image.py wl_base sample/seed.json workmgmt-0.5.7.tar workmgmt:0.5.7
 ```
 
-NAS에서 `docker load -i workmgmt-0.5.5.tar` 후 `deploy/docker-compose.yml`로 실행합니다. `data`(DB · 백업)와 `keys`(암호화 열쇠 · 인증서)는 컨테이너 밖 폴더라 이미지를 바꿔도 그대로 남습니다.
+NAS에서 `docker load -i workmgmt-0.5.7.tar` 후 `deploy/docker-compose.yml`로 실행합니다. `data`(DB · 백업)와 `keys`(암호화 열쇠 · 인증서)는 컨테이너 밖 폴더라 이미지를 바꿔도 그대로 남습니다.
 
 ## 설정 (환경 변수)
 

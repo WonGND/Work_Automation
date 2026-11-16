@@ -2,7 +2,7 @@
 # 이 파일 옆에 data · keys 폴더를 만들어 둡니다 (data = DB · 백업, keys = 암호화 열쇠 · 인증서)
 services:
   workmgmt:
-    image: workmgmt:0.5.5          # tools/mk_image.py 로 만든 이미지 (docker load -i workmgmt-0.5.5.tar)
+    image: workmgmt:0.5.7          # tools/mk_image.py 로 만든 이미지 (docker load -i workmgmt-0.5.7.tar)
     container_name: workmgmt
     restart: unless-stopped
     ports:

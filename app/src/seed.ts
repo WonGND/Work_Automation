@@ -1,6 +1,7 @@
 // 처음 실행할 때 (데이터베이스가 비어 있을 때) seed.json 으로 기준정보 · 계정 · 업무 · 이슈를 넣음
 import { db, q, q1, run, setSetting, getSetting, audit, DATA_DIR, backup } from "./db";
 import { join } from "node:path";
+import { addDays } from "./calc";
 
 export function shortName(full: string) { return full.split(" ")[0]; }
 
@@ -188,11 +189,18 @@ export async function mergeSeed(seed: any): Promise<string> {
 //  - 엑셀에서 없어진 행: 기간 안 시간만 빠지고, 남은 시간이 하나도 없으면 목록에서 숨김 (지우지 않음)
 //  - 이슈: 번호로 맞춰 내용 고침 · 새 번호는 추가 · 담당(정 · 부1 · 부2)은 엑셀 기준 (웹에서 쓴 할 일은 남김)
 //  - 기준정보: 모델 · 공휴일 · 업무 분류 · 휴직을 엑셀 기준으로 더하거나 고침 (지우지 않음)
-export async function importWork(seed: any, from: string, to: string, dry = false) {
-  const R = { users: 0, tasksNew: 0, tasksUpd: 0, renamed: [] as string[], hidden: 0, issuesHidden: [] as string[], hoursSet: 0, issuesNew: 0, issuesUpd: 0, models: 0, leaves: 0, skipped: [] as string[] };
+//  - 웹 기준 시작일(web_start, 기본 2026-11-16)부터는 웹이 우선 (0.5.6):
+//      시간 — 웹에 값이 있으면 그대로, 웹에 없고 엑셀에만 있으면 엑셀 값 · 지우지 않음
+//      업무 · 이슈 내용 · 담당 — 그날 이후 웹에서 고친 업무 · 이슈는 엑셀로 덮어쓰지 않음
+export async function importWork(seed: any, from: string, to: string, dry = false, webStart?: string) {
+  const R = { users: 0, tasksNew: 0, tasksUpd: 0, renamed: [] as string[], hidden: 0, issuesHidden: [] as string[], hoursSet: 0, issuesNew: 0, issuesUpd: 0, models: 0, leaves: 0, skipped: [] as string[],
+    webStart: "", webKeptHours: 0, webKeptTasks: [] as string[], webKeptIssues: [] as string[] };
   const okD = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
   if (!okD(from) || !okD(to) || from > to) throw new Error("기간 형식이 아닙니다");
   const inP = (d: string) => d >= from && d <= to;
+  const W = webStart && okD(webStart) ? webStart : getSetting("web_start", "2026-11-16"); R.webStart = W;
+  const oldTo = to < W ? to : addDays(W, -1);          // 엑셀 값으로 바꾸는(지우기 포함) 마지막 날
+  const webEdited = (action: string, target: string) => !!q1("SELECT 1 FROM audit WHERE action=? AND target=? AND user_id IS NOT NULL AND at>=? LIMIT 1", action, target, W);
   if (!dry) backup("엑셀가져오기전");
   const work = async () => {
     let ord = (q1("SELECT IFNULL(MAX(ord),0) n FROM users")?.n || 0) + 1;
@@ -232,7 +240,8 @@ export async function importWork(seed: any, from: string, to: string, dry = fals
       if (!tk) tk = q1("SELECT * FROM tasks WHERE user_id=? AND kind=? AND title=? AND (fixed=1 OR IFNULL(excel_key,'')='') ORDER BY fixed DESC, id LIMIT 1", u, t.kind, t.title);
       if (!tk) { tk = q1("SELECT * FROM tasks WHERE user_id=? AND kind=? AND ord=? AND fixed=0 AND IFNULL(excel_key,'')='' AND assigned_by IS NULL LIMIT 1", u, t.kind, t.row); if (tk) R.renamed.push(`${t.user}: '${tk.title}' → '${t.title}'`); }
       if (tk) {
-        if (tk.fixed) run("UPDATE tasks SET model_id=COALESCE(?, model_id), category=CASE WHEN ?<>'' THEN ? ELSE category END WHERE id=?", model, t.category, t.category, tk.id);
+        if (!tk.fixed && webEdited("업무 수정", `task ${tk.id}`)) { R.webKeptTasks.push(`${t.user}: ${tk.title}`); run("UPDATE tasks SET excel_key=?, hidden=0 WHERE id=?", key, tk.id); }
+        else if (tk.fixed) run("UPDATE tasks SET model_id=COALESCE(?, model_id), category=CASE WHEN ?<>'' THEN ? ELSE category END WHERE id=?", model, t.category, t.category, tk.id);
         else run(`UPDATE tasks SET title=?, model_id=?, progress=?, start=?, target=?, done=?, importance=?, category=?, note=?, excel_key=?, hidden=0 WHERE id=?`,
           t.title, model, t.kind === "통상" ? t.progress : null, t.start, target, t.done, t.importance, t.category, note, key, tk.id);
         R.tasksUpd++;
@@ -246,12 +255,15 @@ export async function importWork(seed: any, from: string, to: string, dry = fals
     // 기간 안 시간: 엑셀과 연결된 업무(엑셀 행 · 기본 행)는 엑셀 값으로. 웹에서 만든 업무는 손대지 않음
     for (const u of seedUsers) {
       for (const tk of q("SELECT id FROM tasks WHERE user_id=? AND (fixed=1 OR IFNULL(excel_key,'')<>'')", u)) {
-        if (!want.has(tk.id)) run("DELETE FROM task_hours WHERE task_id=? AND date BETWEEN ? AND ?", tk.id, from, to);
+        if (!want.has(tk.id)) run("DELETE FROM task_hours WHERE task_id=? AND date BETWEEN ? AND ?", tk.id, from, oldTo);
       }
     }
     for (const [id, w] of want) {
-      run("DELETE FROM task_hours WHERE task_id=? AND date BETWEEN ? AND ?", id, from, to);
-      for (const [d, h] of Object.entries(w)) if (h) { run("INSERT INTO task_hours(task_id,date,hours) VALUES(?,?,?)", id, d, h); R.hoursSet++; }
+      run("DELETE FROM task_hours WHERE task_id=? AND date BETWEEN ? AND ?", id, from, oldTo);
+      for (const [d, h] of Object.entries(w)) if (h) {
+        if (d >= W) { const r = run("INSERT OR IGNORE INTO task_hours(task_id,date,hours) VALUES(?,?,?)", id, d, h); if (r.changes) R.hoursSet++; else R.webKeptHours++; continue; }   // 웹 우선
+        run("INSERT INTO task_hours(task_id,date,hours) VALUES(?,?,?)", id, d, h); R.hoursSet++;
+      }
     }
     // 엑셀에서 없어진 행: 남은 시간이 없으면 숨김
     for (const u of seedUsers) for (const tk of q("SELECT id, excel_key FROM tasks WHERE user_id=? AND fixed=0 AND hidden=0 AND IFNULL(excel_key,'')<>''", u)) {
@@ -265,7 +277,9 @@ export async function importWork(seed: any, from: string, to: string, dry = fals
       if (i.no > seq) seq = i.no;
       const model = i.model ? (mid.get(i.model) ?? null) : null;
       let iss = q1("SELECT * FROM issues WHERE no=?", i.no);
-      if (iss) {
+      const keepWeb = !!iss && webEdited("이슈 수정", i.no);
+      if (keepWeb) { R.webKeptIssues.push(`${i.no} ${iss.title}`); }
+      else if (iss) {
         run(`UPDATE issues SET model_id=?, title=?, source=?, occurred=?, target=?, stage=?, status_text=?, note=?, cause=?, plan=?, importance=?, done=? WHERE id=?`,
           model, i.title, i.source, i.occurred, i.target, i.stage || 1, i.status_text, i.note, i.cause, i.plan, i.importance, i.done, iss.id); R.issuesUpd++;
       } else {
@@ -274,8 +288,8 @@ export async function importWork(seed: any, from: string, to: string, dry = fals
         iss = { id: Number(r.lastInsertRowid) }; R.issuesNew++;
       }
       const old = q("SELECT * FROM issue_members WHERE issue_id=?", iss.id);
-      run("DELETE FROM issue_members WHERE issue_id=?", iss.id);
-      for (const m of i.members) {
+      if (!keepWeb) run("DELETE FROM issue_members WHERE issue_id=?", iss.id);
+      if (!keepWeb) for (const m of i.members) {
         const u = uid.get(m.name); if (!u) continue;
         const prev = old.find((o: any) => o.user_id === u);
         run("INSERT OR IGNORE INTO issue_members(issue_id,user_id,role,duty,category) VALUES(?,?,?,?,?)", iss.id, u, m.role, prev?.duty || m.duty || "", m.category || prev?.category || "");
@@ -283,12 +297,16 @@ export async function importWork(seed: any, from: string, to: string, dry = fals
       // 기간 안 이슈 시간: 엑셀 값으로 (웹에 쓴 '한 일' 글은 남기고 시간만 0)
       const lw = new Map<number, Record<string, number>>();
       for (const lg of i.logs) { const u = uid.get(lg.user); if (!u) continue; const w = lw.get(u) || {}; for (const [d, h] of Object.entries(lg.hours)) if (inP(d)) w[d] = (w[d] || 0) + (h as number); lw.set(u, w); }
-      for (const r of q("SELECT user_id, date, text FROM issue_logs WHERE issue_id=? AND date BETWEEN ? AND ?", iss.id, from, to)) {
+      for (const r of q("SELECT user_id, date, text FROM issue_logs WHERE issue_id=? AND date BETWEEN ? AND ?", iss.id, from, oldTo)) {
         if (lw.get(r.user_id)?.[r.date]) continue;
         if (r.text) run("UPDATE issue_logs SET hours=0 WHERE issue_id=? AND user_id=? AND date=?", iss.id, r.user_id, r.date);
         else run("DELETE FROM issue_logs WHERE issue_id=? AND user_id=? AND date=?", iss.id, r.user_id, r.date);
       }
       for (const [u, w] of lw) for (const [d, h] of Object.entries(w)) {
+        if (d >= W) {   // 웹 우선: 웹에 시간이 없을 때만 엑셀 값
+          const r = run(`INSERT INTO issue_logs(issue_id,user_id,date,hours,text) VALUES(?,?,?,?,'') ON CONFLICT(issue_id,user_id,date) DO UPDATE SET hours=excluded.hours WHERE IFNULL(issue_logs.hours,0)=0`, iss.id, u, d, h);
+          if (r.changes) R.hoursSet++; else R.webKeptHours++; continue;
+        }
         run(`INSERT INTO issue_logs(issue_id,user_id,date,hours,text) VALUES(?,?,?,?,'') ON CONFLICT(issue_id,user_id,date) DO UPDATE SET hours=excluded.hours`, iss.id, u, d, h); R.hoursSet++;
       }
     }
@@ -296,7 +314,7 @@ export async function importWork(seed: any, from: string, to: string, dry = fals
     const nos = new Set(seed.issues.map((i: any) => i.no));
     for (const iss of q("SELECT * FROM issues WHERE hidden=0", )) {
       if (nos.has(iss.no) || q1("SELECT 1 FROM audit WHERE action='이슈 등록' AND target=?", iss.no)) continue;
-      for (const r of q("SELECT user_id, date, text FROM issue_logs WHERE issue_id=? AND date BETWEEN ? AND ?", iss.id, from, to)) {
+      for (const r of q("SELECT user_id, date, text FROM issue_logs WHERE issue_id=? AND date BETWEEN ? AND ?", iss.id, from, oldTo)) {
         if (!seedUsers.has(r.user_id)) continue;
         if (r.text) run("UPDATE issue_logs SET hours=0 WHERE issue_id=? AND user_id=? AND date=?", iss.id, r.user_id, r.date);
         else run("DELETE FROM issue_logs WHERE issue_id=? AND user_id=? AND date=?", iss.id, r.user_id, r.date);

@@ -10,6 +10,7 @@ import { importSeed, mergeSeed, ensureFixedRows } from "./seed";
 import { handle, HttpError, NET, setupNeeded, acctFiles } from "./api";
 import { initSecret, enc, isEnc, randCode } from "./secret";
 import { ensureSelfSigned } from "./selfsign";
+import { missReminder } from "./remind";
 import { networkInterfaces } from "node:os";
 import { join, dirname } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
@@ -19,7 +20,7 @@ import CSS from "../public/style.css" with { type: "text" };
 import { GUIDE } from "./guide_img";
 import { createHash } from "node:crypto";
 
-export const VERSION = "업무관리 0.5.5";
+export const VERSION = "업무관리 0.5.7";
 const args = process.argv.slice(2);
 const ENVK: Record<string, string> = { "--port": "WL_PORT", "--data": "WL_DATA", "--cert": "WL_TLS_CERT", "--key": "WL_TLS_KEY", "--http-port": "WL_HTTP_PORT", "--key-file": "WL_KEY_FILE", "--seed": "WL_SEED" };
 const arg = (k: string, d: string) => { const i = args.indexOf(k); if (i >= 0 && args[i + 1]) return args[i + 1]; const e = ENVK[k] && process.env[ENVK[k]]; return e || d; };
@@ -112,10 +113,15 @@ function dailyBackup() {
 }
 dailyBackup();
 setInterval(dailyBackup, 30 * 60e3);
+// 미입력 알림: 근무일 아침 8시 이후 첫 확인 때 한 번 (10분마다 확인)
+const remind = () => { try { missReminder(); } catch (e) { console.error("미입력 알림 실패", e); } };
+remind(); setInterval(remind, 10 * 60e3);
 
 const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'";
 // 버전이 바뀌면 모든 사람에게 알림 (우상단 🔔)
 const NOTES: Record<string, string> = {
+  "업무관리 0.5.7": "미입력 알림 (전 근무일에 시간이 없으면 아침에 🔔 · 팀장 · PL에게는 주 첫날 지난주 요약) · 다른 사람이 바꾼 계정 · 모델 · 이슈 담당이 열려 있는 화면에도 몇 분 안에 반영 · 엑셀 가져오기는 마스터만",
+  "업무관리 0.5.6": "입사 · 퇴사 (관리 > 계정에 입사일 · 퇴사일, 퇴사 다음 날부터 로그인 막힘 · 목록에서 숨김, 기록은 남음) · 사람별을 파트마다 한 열로 · 엑셀 가져오기에 '웹 기준 시작일' (그날부터는 웹 값 우선, 웹에서 고친 업무 · 이슈 · 담당은 덮어쓰지 않음)",
   "업무관리 0.5.5": "다크 모드 — 오른쪽 위 화면 A · B · C 옆 🌙 버튼 (화면마다 어두운 색 따로 · 사람별 저장)",
   "업무관리 0.5.4": "'시범판' 표시 없앰 · 업무 추가 창에서 날짜별 시간 · 그날 한 일 같이 넣기 · 달력에서 오늘 날짜가 안 눌리던 문제 고침 · 시간을 넣으면 근무 시간율 등 요약이 바로 바뀜 · 이슈 정리에 모델 고르기 · 업무 목록 구분 · 머리글 가운데 정렬 · 업무 로드 칸의 '배율 반영 시간' 없앰 · 변경 기록에서 시간 입력 내용 뺌 · 엑셀 내보내기 없앰",
   "웹 시범판 0.5.3": "인증서 설치 안내를 그림으로 — 로그인 화면 노란 상자를 누르면 실제 창 모양 그림 11장을 넘기며 따라 하기 · 보안 경고 창의 지문 확인 값 표시",

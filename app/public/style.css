@@ -464,3 +464,10 @@ html[data-dark="1"] .cert-dots span{background:#3a4456}
 html[data-dark="1"] .cert-dots span.on{background:var(--navy2)}
 html[data-dark="1"] .hrs-box{background:#141a23}
 html[data-dark="1"] .tbl{border-color:var(--line)}
+
+/* 0.5.6 사람별: 파트마다 한 열 */
+.part-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;align-items:start}
+.part-col{display:flex;flex-direction:column;gap:8px}
+.part-hd{font-weight:700;padding:6px 10px;border-radius:8px;background:var(--blue);color:var(--blue-ink)}
+.card.person{text-decoration:none;color:inherit;padding:10px 12px}
+.card.person:hover{border-color:var(--navy2)}

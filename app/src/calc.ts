@@ -63,8 +63,11 @@ export type PersonStats = {
 export function personStats(c: Ctx, userId: number, from: string, to: string): PersonStats {
   const hstart = getSetting("hstart", "2026-10-12");
   const t = today();
-  const s = from < hstart ? hstart : from;
-  const e = to > t ? t : to;
+  const uu = q1("SELECT joined, left_on FROM users WHERE id=?", userId) || {};
+  let s = from < hstart ? hstart : from;
+  let e = to > t ? t : to;
+  if (uu.joined && uu.joined > s) s = uu.joined;      // 입사 전 날짜는 기준 시간 · 미입력에서 뺌
+  if (uu.left_on && uu.left_on < e) e = uu.left_on;   // 퇴사 다음 날부터도 뺌
   const dayH = num("day_hours", 8), earlyH = num("early_hours", 2);
   const lv = leaveDays(userId);
   let workdays = 0; const wd = new Set<string>();
