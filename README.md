@@ -7,9 +7,10 @@
 
 ## 주요 기능
 
-- **시간 입력**: 주간 표에 0.5시간 단위로 입력하면 바로 저장. 날짜별 '그날 한 일', 하루 합계 색(미입력 · 8h 초과), 입력 즉시 근무 시간율 갱신
+- **시간 입력**: 주간 · 월간 표에 0.5시간 단위로 입력하면 바로 저장. 날짜별 '그날 한 일', 하루 합계 색(미입력 · 8h 초과), 입력 즉시 근무 시간율 갱신
 - **업무**: 통상 · 기타 업무 추가(날짜별 시간 함께 입력), 진행률 · 마감일 · 완료, 끌어서 순서 바꾸기, PL의 업무 지정
 - **이슈**: PL이 등록하고 정 · 부1 · 부2 담당 지정, 단계 · 일정(지연 · 임박) 관리, 이슈 정리(파트 · 모델별 보기)
+- **이슈 진행 현황 4칸**: 현상 · 원인 분석 · 개선검토 · 검증 및 적용 (PL · 팀장 · 마스터가 씀, 칸별 마지막 수정 표시), 이슈당 첨부 이미지 한 장(붙여넣기 · 끌어다 놓기 · DB 밖 폴더에 저장)
 - **업무로드**: 파트 · 개인별 근무 시간율, 등급 배율을 반영한 업무 로드, 판정(과부하 · 적정 · 여유), 모델별 투입
 - **권한**: 팀원 · PL · 팀장 · 마스터 (우리 파트 · 내가 담당인 이슈만 보기 등)
 - **알림 · 요청**: 🔔 알림, PL · 팀장에게 요청 보내기
@@ -70,6 +71,7 @@ python3 tools/api_test.py   http://127.0.0.1:8000 acc.txt                     # 
 python3 tools/import_test.py http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 엑셀 가져오기 (19건)
 python3 tools/v056_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 웹 우선 가져오기 · 입사 · 퇴사 (24건)
 python3 tools/v057_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 미입력 알림 · 화면 갱신 번호 · 가져오기 권한 (14건)
+python3 tools/v060_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 이슈 4칸 · 첨부 이미지 · 월간 표 · 모델 여러 줄/숨김 (74건)
 python3 tools/mail_test.py  http://127.0.0.1:8000 <비밀번호> 홍길동           # 메일 · 비밀번호 찾기 (15건, aiosmtpd 필요)
 ```
 
@@ -79,10 +81,10 @@ python3 tools/mail_test.py  http://127.0.0.1:8000 <비밀번호> 홍길동      
 
 ```bash
 cd app && bun build --compile --target=bun-linux-x64-baseline src/server.ts --outfile ../wl_base && cd ..
-python3 tools/mk_image.py wl_base sample/seed.json workmgmt-0.5.7.tar workmgmt:0.5.7
+python3 tools/mk_image.py wl_base sample/seed.json workmgmt-0.6.0.tar workmgmt:0.6.0
 ```
 
-NAS에서 `docker load -i workmgmt-0.5.7.tar` 후 `deploy/docker-compose.yml`로 실행합니다. `data`(DB · 백업)와 `keys`(암호화 열쇠 · 인증서)는 컨테이너 밖 폴더라 이미지를 바꿔도 그대로 남습니다.
+NAS에서 `docker load -i workmgmt-0.6.0.tar` 후 `deploy/docker-compose.yml`로 실행합니다. `data`(DB · 백업)와 `keys`(암호화 열쇠 · 인증서)는 컨테이너 밖 폴더라 이미지를 바꿔도 그대로 남습니다.
 
 ## 설정 (환경 변수)
 

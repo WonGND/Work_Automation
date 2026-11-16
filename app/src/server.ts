@@ -20,7 +20,7 @@ import CSS from "../public/style.css" with { type: "text" };
 import { GUIDE } from "./guide_img";
 import { createHash } from "node:crypto";
 
-export const VERSION = "업무관리 0.5.7";
+export const VERSION = "업무관리 0.6.0";
 const args = process.argv.slice(2);
 const ENVK: Record<string, string> = { "--port": "WL_PORT", "--data": "WL_DATA", "--cert": "WL_TLS_CERT", "--key": "WL_TLS_KEY", "--http-port": "WL_HTTP_PORT", "--key-file": "WL_KEY_FILE", "--seed": "WL_SEED" };
 const arg = (k: string, d: string) => { const i = args.indexOf(k); if (i >= 0 && args[i + 1]) return args[i + 1]; const e = ENVK[k] && process.env[ENVK[k]]; return e || d; };
@@ -120,6 +120,8 @@ remind(); setInterval(remind, 10 * 60e3);
 const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'";
 // 버전이 바뀌면 모든 사람에게 알림 (우상단 🔔)
 const NOTES: Record<string, string> = {
+  "업무관리 0.6.0": "이슈 진행 현황을 4칸으로 (현상 · 원인 분석 · 개선검토 · 검증 및 적용) — 이슈를 누르면 왼쪽에 이슈 정보, 오른쪽에 4칸 · PL · 팀장 · 마스터가 씀 · 예전 진행현황은 '현상', 원인은 '원인 분석', 대응 계획은 '개선검토' 칸에 그대로 · 이슈 첨부 이미지 한 장 (붙여넣기 Ctrl+V · 끌어다 놓기 · 파일 고르기, 이슈 정리의 🖼 버튼으로 보기) · 이슈 요약에 발생일 · 현재 진행 칸 · 담당은 정 · 부1 · 부2 순서로 이름만 · 모든 표 머리글 가운데 정렬 · 업무로드 · 요약 기간에 이전 / 다음 버튼 (주 · 월 · 연) · 내 업무 시간 입력 표 월간 보기 · 기준정보 모델 여러 줄 한 번에 추가 · 모델 삭제(숨김) · 되살리기 · 업무 추가 창에서 모델 · 업무 분류 검색",
+  "업무관리 0.5.8": "엑셀 가져오기: 이슈 정리의 지연 사유도 가져옴 (엑셀 이슈 정리의 담당 · 맡은 일 · 진행현황 · 단계를 다시 맞춤)",
   "업무관리 0.5.7": "미입력 알림 (전 근무일에 시간이 없으면 아침에 🔔 · 팀장 · PL에게는 주 첫날 지난주 요약) · 다른 사람이 바꾼 계정 · 모델 · 이슈 담당이 열려 있는 화면에도 몇 분 안에 반영 · 엑셀 가져오기는 마스터만",
   "업무관리 0.5.6": "입사 · 퇴사 (관리 > 계정에 입사일 · 퇴사일, 퇴사 다음 날부터 로그인 막힘 · 목록에서 숨김, 기록은 남음) · 사람별을 파트마다 한 열로 · 엑셀 가져오기에 '웹 기준 시작일' (그날부터는 웹 값 우선, 웹에서 고친 업무 · 이슈 · 담당은 덮어쓰지 않음)",
   "업무관리 0.5.5": "다크 모드 — 오른쪽 위 화면 A · B · C 옆 🌙 버튼 (화면마다 어두운 색 따로 · 사람별 저장)",

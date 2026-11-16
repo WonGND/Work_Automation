@@ -49,14 +49,16 @@ function typeBox(msg, word) {
     setTimeout(() => inp.focus(), 50);
   });
 }
-function modal(title, body, buttons) {
+function modal(title, body, buttons, opts = {}) {
   const bg = h("div", { class: "modal-bg" });
-  const close = () => bg.remove();
+  let gone = false;
+  const close = () => { if (gone) return; gone = true; bg.remove(); opts.onClose?.(); };
+  const tryClose = async () => { if (opts.beforeClose && !(await opts.beforeClose())) return; close(); };
   const ft = h("div", { class: "ft" });
   for (const b of buttons || []) ft.append(h("button", { class: "btn " + (b.cls || ""), onclick: async () => { try { const r = await b.fn?.(); if (r !== false) close(); } catch (e) { toast(e.message, true); } } }, b.text));
-  ft.append(h("button", { class: "btn", onclick: close }, "닫기"));
-  bg.append(h("div", { class: "modal" }, h("div", { class: "hd" }, title), h("div", { class: "bd" }, body), ft));
-  bg.addEventListener("mousedown", e => { if (e.target === bg) close(); });
+  ft.append(h("button", { class: "btn", onclick: tryClose }, "닫기"));
+  bg.append(h("div", { class: "modal" + (opts.cls ? " " + opts.cls : "") }, h("div", { class: "hd" }, title), h("div", { class: "bd" }, body), ft));
+  bg.addEventListener("mousedown", e => { if (e.target === bg && !opts.noBgClose) close(); });
   document.body.append(bg);
   return close;
 }
@@ -66,7 +68,40 @@ function confirmBox(msg) {
     const obs = new MutationObserver(() => { if (!body.isConnected) { obs.disconnect(); if (!ok) res(false); } }); obs.observe(document.body, { childList: true }); });
 }
 function field(label, el, full) { return [h("label", {}, label), full ? h("div", { class: "full" }, el) : el]; }
-const modelsFor = part => M.models.filter(m => m.active && (!part || m.part === part));
+const modelsFor = part => M.models.filter(m => m.active && !m.hidden && (!part || m.part === part));
+// 검색되는 고르기 칸: 누르면 목록, 글자를 치면 그 글자가 들어간 것만 (띄어 쓰면 모두 들어간 것) · ↑↓ Enter
+function searchSel(options, value, attrs = {}) {
+  const opts = options.map(o => { const [v, t] = Array.isArray(o) ? o : [o, o]; return { v: String(v ?? ""), t: String(t) }; });
+  let cur = String(value ?? ""); if (!opts.some(o => o.v === cur)) cur = opts[0]?.v ?? "";
+  const label = v => opts.find(o => o.v === v)?.t ?? "";
+  const inp = h("input", { class: "ssel-in", value: label(cur), placeholder: "글자를 치면 검색", disabled: attrs.disabled, autocomplete: "off", spellcheck: "false", title: "눌러서 고르기 · 글자를 치면 검색" });
+  const list = h("div", { class: "ssel-list" }); list.hidden = true;
+  const wrap = h("span", { class: "ssel" + (attrs.class ? " " + attrs.class : "") }, inp, h("i", { class: "ssel-car" }, "▾"), list);
+  let hi = -1, shown = [];
+  const mark = () => { [...list.children].forEach((el, k) => el.classList.toggle("hi", k === hi)); list.children[hi]?.scrollIntoView({ block: "nearest" }); };
+  const draw = kw => {
+    const ws = kw.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    shown = opts.filter(o => ws.every(w => o.t.toLowerCase().includes(w)));
+    hi = ws.length ? (shown.length ? 0 : -1) : shown.findIndex(o => o.v === cur);
+    list.replaceChildren(...(shown.length ? shown.map((o, k) => h("div", { class: "ssel-op" + (o.v === cur ? " cur" : ""), "data-i": k }, o.t)) : [h("div", { class: "ssel-no" }, "맞는 항목이 없습니다")]));
+    mark();
+  };
+  const open = () => { if (inp.disabled) return; list.hidden = false; draw(""); inp.select(); };
+  const close = () => { list.hidden = true; inp.value = label(cur); };
+  const pick = o => { if (!o) return; const ch = o.v !== cur; cur = o.v; close(); if (ch) wrap.dispatchEvent(new Event("change", { bubbles: true })); };
+  inp.addEventListener("focus", open);
+  inp.addEventListener("mousedown", () => { if (list.hidden && document.activeElement === inp) open(); });
+  inp.addEventListener("input", () => { list.hidden = false; draw(inp.value); });
+  inp.addEventListener("blur", close);
+  inp.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (list.hidden) return open(); if (shown.length) { hi = (hi + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length; mark(); } }
+    else if (e.key === "Enter") { if (!list.hidden) { e.preventDefault(); pick(shown[hi]); } }
+    else if (e.key === "Escape") { if (!list.hidden) { e.stopPropagation(); close(); } }
+  });
+  list.addEventListener("mousedown", e => { e.preventDefault(); const el = e.target.closest(".ssel-op"); if (el) pick(shown[Number(el.dataset.i)]); });
+  Object.defineProperty(wrap, "value", { get() { return cur; }, set(v) { cur = opts.some(o => o.v === String(v ?? "")) ? String(v ?? "") : cur; inp.value = label(cur); } });
+  return wrap;
+}
 const assignable = () => M.users.filter(u => u.active && !u.gone && u.role !== "lead");
 const isPLUser = id => M.users.find(u => u.id === id)?.role === "pl";
 // 이름 "홍길동 책임" → 이름은 줄바꿈 없이, 직급은 작게
@@ -414,7 +449,16 @@ function periodBar(onChange) {
   } else {
     const b = dateInput(PER.base || M.today);
     b.addEventListener("change", () => { if (/^\d{4}-\d{2}-\d{2}$/.test(b.value)) { PER.base = b.value; onChange(); } });
-    box.append(h("span", { class: "muted small" }, "기준일"), b, (PER.base && PER.base !== M.today) ? h("button", { class: "btn sm", onclick: () => { PER.base = null; onChange(); } }, "오늘로") : "");
+    // 0.6.0: 이전 / 다음 (주 · 월 · 연)
+    const unit = { week: "주", month: "달", year: "해" }[PER.mode];
+    const shift = n => {
+      const cur = PER.base || M.today;
+      if (PER.mode === "week") PER.base = addDays(monday(cur), 7 * n);
+      else { const d = new Date(cur + "T00:00:00Z"); d.setUTCDate(1); if (PER.mode === "month") d.setUTCMonth(d.getUTCMonth() + n); else { d.setUTCMonth(0); d.setUTCFullYear(d.getUTCFullYear() + n); } PER.base = d.toISOString().slice(0, 10); }
+      onChange();
+    };
+    box.append(h("button", { class: "btn sm per-prev", onclick: () => shift(-1) }, `◀ 이전 ${unit}`), h("button", { class: "btn sm per-next", onclick: () => shift(1) }, `다음 ${unit} ▶`),
+      h("span", { class: "muted small" }, "기준일"), b, (PER.base && PER.base !== M.today) ? h("button", { class: "btn sm", onclick: () => { PER.base = null; onChange(); } }, "오늘로") : "");
   }
   return box;
 }
@@ -451,17 +495,21 @@ async function pageMe(uid, readonly) {
 }
 
 async function renderWeek(box, uid, readonly, refreshAll) {
-  const w = await api("GET", `/api/week?user=${uid}&from=${weekFrom}`);
+  const mon = getPref("wkMode", "week") === "month";   // 0.6.0: 월간 보기 (한 달 치 · 입력도 됨)
+  const w = await api("GET", `/api/week?user=${uid}&from=${weekFrom}${mon ? "&mode=month" : ""}`);
   const again = () => renderWeek(box, uid, readonly, refreshAll);
+  const nDays = w.days.length;
+  const moveMonth = n => { const d = new Date(w.from + "T00:00:00Z"); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + n); weekFrom = d.toISOString().slice(0, 10); again(); };
   const nav = h("div", { class: "row", style: "margin-bottom:8px" },
-    h("button", { class: "btn sm", onclick: () => { weekFrom = addDays(weekFrom, -7); again(); } }, "◀ 이전 주"),
-    h("b", { class: "wk-range" }, `${dd(w.from)} ~ ${dd(w.to)}`),
-    h("button", { class: "btn sm", onclick: () => { weekFrom = addDays(weekFrom, 7); again(); } }, "다음 주 ▶"),
-    h("button", { class: "btn sm", onclick: () => { weekFrom = monday(M.today); again(); } }, "이번 주"),
+    h("div", { class: "seg wk-mode" }, [["week", "주간"], ["month", "월간"]].map(([k, t]) => h("button", { class: (mon ? "month" : "week") === k ? "on" : "", onclick: () => { setPref("wkMode", k); weekFrom = k === "week" ? monday(w.from <= M.today && M.today <= w.to ? M.today : w.from) : w.from; again(); } }, t))),
+    h("button", { class: "btn sm", onclick: () => { if (mon) moveMonth(-1); else { weekFrom = addDays(weekFrom, -7); again(); } } }, mon ? "◀ 이전 달" : "◀ 이전 주"),
+    h("b", { class: "wk-range" }, mon ? `${w.from.slice(0, 4)}년 ${Number(w.from.slice(5, 7))}월` : `${dd(w.from)} ~ ${dd(w.to)}`),
+    h("button", { class: "btn sm", onclick: () => { if (mon) moveMonth(1); else { weekFrom = addDays(weekFrom, 7); again(); } } }, mon ? "다음 달 ▶" : "다음 주 ▶"),
+    h("button", { class: "btn sm", onclick: () => { weekFrom = mon ? M.today : monday(M.today); again(); } }, mon ? "이번 달" : "이번 주"),
     h("div", { class: "spacer" }),
     readonly ? "" : h("button", { class: "btn", onclick: () => requestModal() }, "✉ 요청하기"),
     readonly ? "" : h("button", { class: "btn pri", onclick: () => taskModal(null, false, refreshAll) }, "+ 업무 추가"));
-  const thead = h("thead", {}, h("tr", {}, h("th", { class: "name" }, "업무 · 이슈"), w.days.map(d => h("th", { class: "c " + (d.workday ? "" : "we ") + (d.holiday ? "hol " : "") + (d.today ? "today" : ""), title: d.holiday || "" }, dd(d.date), d.holiday ? h("div", { class: "small" }, d.holiday) : "")), h("th", { class: "c" }, "합계")));
+  const thead = h("thead", {}, h("tr", {}, h("th", { class: "name" }, "업무 · 이슈"), w.days.map(d => h("th", { class: "c " + (d.workday ? "" : "we ") + (d.holiday ? "hol " : "") + (d.today ? "today" : ""), title: d.holiday || d.date }, mon ? [String(Number(d.date.slice(8))), h("div", { class: "small" }, WD[new Date(d.date + "T00:00:00").getDay()])] : dd(d.date), d.holiday && !mon ? h("div", { class: "small" }, d.holiday) : "")), h("th", { class: "c" }, "합계")));
   const tbody = h("tbody");
   const totals = {}; const leave = {}; const early = {};
   const sumRow = h("tr", { class: "sum" });
@@ -495,7 +543,7 @@ async function renderWeek(box, uid, readonly, refreshAll) {
       const row = allInputs[nr]; if (row && row[nc] && !row[nc].disabled) { row[nc].focus(); return; }
       if (dc) break; nr += dr;
     }
-    if (dc) { const row = allInputs[r]; while ((nc += dc) >= 0 && nc < 7) if (row[nc] && !row[nc].disabled) { row[nc].focus(); return; } }
+    if (dc) { const row = allInputs[r]; while ((nc += dc) >= 0 && nc < nDays) if (row[nc] && !row[nc].disabled) { row[nc].focus(); return; } }
   };
   const cell = (r, d, ri, ci) => {
     const dis = readonly || d.beforeStart || d.leave;
@@ -552,7 +600,7 @@ async function renderWeek(box, uid, readonly, refreshAll) {
   const grp = (label, key, list, opts = {}) => {
     if (!list.length && !opts.always) return;
     const open = getPref("wk:" + key, !opts.closed);
-    const tr = h("tr", { class: "grp" + (open ? " open" : "") }, h("td", { colspan: 9 }, h("span", { class: "car" }, "▸"), ` ${label} (${list.length})`));
+    const tr = h("tr", { class: "grp" + (open ? " open" : "") }, h("td", { colspan: nDays + 2 }, h("span", { class: "car" }, "▸"), ` ${label} (${list.length})`));
     const body = h("tbody", { class: "gbody" }); body.hidden = !open;
     tr.addEventListener("click", () => { body.hidden = !body.hidden; tr.classList.toggle("open", !body.hidden); setPref("wk:" + key, !body.hidden); });
     const head = h("tbody", {}, tr);
@@ -564,11 +612,11 @@ async function renderWeek(box, uid, readonly, refreshAll) {
   grp("이슈", "iss", iss.filter(r => !r.done));
   grp("업무", "task", rest.filter(r => !r.done), { always: true, drag: true });
   grp("기본 행 (회의 · 교육 · 휴가 · 조퇴)", "fix", fixed, { always: true });
-  grp("완료 · 삭제한 것 (이번 주 기록 있음)", "done", [...iss.filter(r => r.done), ...rest.filter(r => r.done)], { closed: true });
+  grp(`완료 · 삭제한 것 (이번 ${mon ? "달" : "주"} 기록 있음)`, "done", [...iss.filter(r => r.done), ...rest.filter(r => r.done)], { closed: true });
   recalc();
-  const table = h("table", {}, thead, ...tables);
-  resizable(table, "week");
-  box.replaceChildren(nav, h("div", { class: "week" }, table),
+  const table = h("table", { class: mon ? "mon" : "" }, thead, ...tables);
+  resizable(table, mon ? "month" : "week");
+  box.replaceChildren(nav, h("div", { class: "week" + (mon ? " month" : "") }, table),
     h("div", { class: "legend" }, h("span", {}, h("i", { style: "background:var(--warn)" }), "미입력 · 부족"), h("span", {}, h("i", { style: "background:var(--bad)" }), `${w.dayHours}h 초과`),
       h("span", {}, h("i", { style: "background:var(--ok)" }), "휴가"), h("span", {}, h("i", { style: "background:var(--violet)" }), "휴직"), h("span", {}, h("b", { class: "note-btn has" }, "✎"), " = 그날 한 일 있음"),
       h("span", {}, `조퇴 행에는 ${w.earlyHours}을 넣으면 그날 기준 시간이 ${w.dayHours - w.earlyHours}h가 됩니다`)));
@@ -615,12 +663,13 @@ async function taskModal(t0, readonly, after) {
   readonly = readonly || !t.canEdit;
   const dis = readonly;
   const kind = sel(t.fixed ? [t.kind] : ["통상", "기타", "휴가", "조퇴"], t.kind, { disabled: readonly || t.fixed });
-  const model = sel([["", "공통 (모델 없음)"], ...modelsFor("").map(m => [m.id, `${m.name} (${m.part} · ${m.phase || "-"})`])], t.model_id, { disabled: dis });
+  const mList = modelsFor("").concat(t.model_id && !modelsFor("").some(m => m.id === t.model_id) ? M.models.filter(m => m.id === t.model_id) : []);   // 꺼진 · 삭제한 모델이라도 지금 값은 보이게
+  const model = searchSel([["", "공통 (모델 없음)"], ...mList.map(m => [m.id, `${m.name} (${m.part} · ${m.phase || "-"})`])], t.model_id, { disabled: dis });
   const title = h("input", { value: t.title || "", disabled: readonly });
   const prog = sel([["", "-"], ...Array.from({ length: 11 }, (_, i) => [i * 10, i * 10 + "%"])], t.progress, { disabled: dis });
   const st = dateInput(t.start, { disabled: dis }), tg = dateInput(t.target, { disabled: dis }), dn = dateInput(t.done, { disabled: dis });
   const imp = sel(["", "상", "중", "하"], t.importance, { disabled: dis });
-  const cat = sel([["", "-"], ...M.categories.map(c => [c.name, c.name])], t.category, { disabled: dis });
+  const cat = searchSel([["", "-"], ...M.categories.map(c => [c.name, c.name])], t.category, { disabled: dis });
   const note = h("textarea", { disabled: dis }, t.note || "");
   const form = h("div", { class: "form" }, t.fixed && !readonly ? h("div", { class: "full help" }, "기본 행입니다. 이름 · 모델 · 분류 · 비고는 고칠 수 있고, 구분(기타 · 휴가 · 조퇴)은 계산에 쓰여 바꿀 수 없습니다.") : "", t.assigned_name ? h("div", { class: "full help" }, `${t.assigned_name} 이(가) 지정한 업무입니다.`) : "",
     ...field("구분", kind), ...field("모델", model), ...field("업무명", title), ...field("진행률 (통상)", prog),
@@ -692,10 +741,8 @@ async function pageMyIssues() {
 }
 function issueCard(i) {
   const my = i.members.find(m => m.user_id === M.user.id);
-  const isLead = my?.role === "정";
   const can = i.canManage;
   const stage = sel(M.stages.map((s, k) => [k + 1, s]), i.stage, { disabled: !can });
-  const cause = h("textarea", { class: "inp", disabled: !isLead && !can }, i.cause || ""), plan = h("textarea", { class: "inp", disabled: !isLead && !can }, i.plan || "");
   const cat = sel([["", "-"], ...M.categories.map(c => [c.name, c.name])], my?.category);
   const delay = h("textarea", { class: "inp", readOnly: true, rows: 2 }, i.delay_reason || "");
   delay.addEventListener("focus", () => { if (!can) toast("입력 권한이 없습니다 (지연 사유는 PL이 입력)", true); });
@@ -710,14 +757,15 @@ function issueCard(i) {
   const body = h("div", { class: "ic-body" },
     h("div", { class: "duty" }, h("b", {}, "할 일 (PL 지정)"), h("div", { class: "pre" }, my?.duty || h("span", { class: "muted" }, "PL이 아직 적지 않았습니다"))),
     h("div", { class: "kv" }, h("div", {}, h("b", {}, "모델"), `${i.model} (${i.part})`), h("div", {}, h("b", {}, "발생처"), i.source || "-"), h("div", {}, h("b", {}, "발생일"), i.occurred || "-"),
-      h("div", {}, h("b", {}, "Target (PL)"), i.target || "-"), h("div", {}, h("b", {}, "담당"), i.members.map(m => `${m.role} ${m.name}`).join(" · ")), h("div", {}, h("b", {}, "진척"), Math.round(i.progress * 100) + "%")),
-    h("div", { class: "form" }, ...field("단계 (PL)", stage), ...field("진행현황 (PL)", h("div", { class: "pre small" }, i.status_text || "-")),
-      ...field("지연 사유 (PL)", h("div", {}, delay, h("div", { class: "lock" }, "🔒 PL만 입력합니다"))),
-      ...field("원인 (정)", cause), ...field("대응 계획 (정)", plan), ...field("내 업무 분류", cat)),
+      h("div", {}, h("b", {}, "Target (PL)"), i.target || "-"), h("div", {}, h("b", {}, "담당 (정 · 부1 · 부2)"), ["정", "부1", "부2"].map(r => i.members.find(m => m.role === r)).filter(Boolean).map(m => m.name).join(" · ") || "-"), h("div", {}, h("b", {}, "진척"), Math.round(i.progress * 100) + "%")),
+    h("div", { class: "row", style: "margin:10px 0 6px" }, h("b", {}, "진행 현황"), h("span", { class: "muted small" }, "PL · 팀장이 씁니다"), h("div", { class: "spacer" }),
+      h("button", { class: "btn sm", onclick: () => issueBoard(i, () => route()) }, i.has_image ? "크게 보기 · 🖼 첨부 이미지" : "크게 보기")),
+    h("div", { class: "ibox-grid mini" }, IBOX.map(([k, t, , cls, ic]) => h("section", { class: "ibox " + cls }, h("div", { class: "ibox-hd" }, h("span", { class: "ibox-ic", html: ic }), h("b", {}, t)), h("div", { class: "ibox-ro pre" }, i[k] || h("span", { class: "muted" }, "-"))))),
+    h("div", { class: "form", style: "margin-top:12px" }, ...field("단계 (PL)", stage),
+      ...field("지연 사유 (PL)", h("div", {}, delay, h("div", { class: "lock" }, "🔒 PL만 입력합니다"))), ...field("내 업무 분류", cat)),
     h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn pri", onclick: async () => {
       try {
-        const b = { cause: cause.value, plan: plan.value }; if (can) b.stage = Number(stage.value);
-        if (isLead || can) await api("PUT", `/api/issues/${i.id}`, b);
+        if (can) await api("PUT", `/api/issues/${i.id}`, { stage: Number(stage.value) });
         await api("PUT", `/api/issues/${i.id}/me`, { category: cat.value });
         toast("저장했습니다");
       } catch (e) { toast(e.message, true); }
@@ -750,22 +798,131 @@ async function pageIssues(scope) {
       return h("tr", { class: "click" + (i.hidden ? " muted" : "") + (i.done || i.stage === 6 ? " is-done" : ""), onclick: () => issueModal(i, load) },
         h("td", { class: "nowrap" }, h("b", {}, i.no)), h("td", {}, i.model, h("div", { class: "small muted" }, i.part)), h("td", { class: "small" }, i.source), h("td", { class: "ttl" }, i.title, i.hidden ? [" ", badge("warn", "삭제됨")] : "", i.plAssigned.length ? [" ", badge("warn", "PL 담당 → 재지정")] : ""),
         h("td", {}, mem("정")), h("td", {}, mem("부1")), h("td", {}, mem("부2")), h("td", { class: "nowrap small" }, i.occurred || ""), h("td", { class: "nowrap small" }, i.target || ""),
-        h("td", {}, badge(i.sched.cls, i.sched.text)), h("td", { class: "nowrap small" }, M.stages[(i.stage || 1) - 1] || ""), h("td", { class: "small pre status" }, i.status_text || ""),
-        h("td", { class: "small pre" }, i.needDelay ? badge("late", "지연 사유 필요") : (i.delay_reason || "")));
+        h("td", {}, badge(i.sched.cls, i.sched.text)), h("td", { class: "nowrap small" }, M.stages[(i.stage || 1) - 1] || ""), h("td", { class: "small pre status" }, nowCell(i)),
+        h("td", { class: "small pre" }, i.needDelay ? badge("late", "지연 사유 필요") : (i.delay_reason || "")),
+        h("td", { class: "c" }, i.has_image ? h("button", { class: "btn sm img-btn", title: "첨부 이미지 보기", onclick: e => { e.stopPropagation(); imageView(i); } }, "🖼") : ""));
     });
-    const table = h("table", { class: "issues" }, h("thead", {}, h("tr", {}, ["번호", "모델", "발생처", "이슈명", "정", "부1", "부2", "발생일", "Target", "일정", "단계", "진행현황", "지연 사유"].map(x => h("th", {}, x)))),
-      h("tbody", {}, rows.length ? rows : h("tr", {}, h("td", { colspan: 13, class: "c muted" }, "이슈가 없습니다"))));
+    const table = h("table", { class: "issues" }, h("thead", {}, h("tr", {}, ["번호", "모델", "발생처", "이슈명", "정", "부1", "부2", "발생일", "Target", "일정", "단계", "현재 진행", "지연 사유", "첨부"].map(x => h("th", {}, x)))),
+      h("tbody", {}, rows.length ? rows : h("tr", {}, h("td", { colspan: 14, class: "c muted" }, "이슈가 없습니다"))));
     resizable(table, "issues-" + scope);
     root.replaceChildren(head,
-      h("div", { class: "help" }, "이슈는 PL이 등록하고 정 · 부1 · 부2와 각자의 할 일을 지정합니다. 지정된 사람의 '내 이슈'와 시간 입력 표에 바로 생깁니다. 담당별 투입 · 오늘 한 일은 이슈를 누르면 보입니다. 목표일이 지났는데 끝나지 않았으면 지연 사유를 적어 주세요."),
+      h("div", { class: "help" }, "이슈를 누르면 왼쪽에 이슈 정보, 오른쪽에 진행 현황 4칸(현상 · 원인 분석 · 개선검토 · 검증 및 적용)이 열립니다. '현재 진행'은 내용이 있는 가장 뒤 칸입니다. 🖼 = 첨부 이미지 보기. 이슈는 PL이 등록하고 정 · 부1 · 부2와 각자의 할 일을 지정합니다. 목표일이 지났는데 끝나지 않았으면 지연 사유를 적어 주세요."),
       h("div", { class: "tbl" }, table));
   };
   await load();
 }
 
-async function issueModal(i0, after) {
+// 진행 현황 4칸: [칸(DB 열), 이름, 안내 질문, 색, 아이콘]
+const IBOX = [
+  ["status_text", "현상", "어떤 문제가 발생했는지?", "b1", '<svg viewBox="0 0 24 24"><path d="M12 5v9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="12" cy="18.5" r="1.8" fill="currentColor"/></svg>'],
+  ["cause", "원인 분석", "왜 이런 문제가 발생했는지?", "b2", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M15 15l4.5 4.5"/></svg>'],
+  ["plan", "개선검토", "어떻게 개선할 수 있을지?", "b3", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6M10 20h4M12 4a6 6 0 0 0-3.5 10.9c.5.4.8 1 .8 1.6V17h5.4v-.5c0-.6.3-1.2.8-1.6A6 6 0 0 0 12 4z"/></svg>'],
+  ["verify", "검증 및 적용", "개선안이 잘 적용되었는지?", "b4", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12.5l4 4 8-9"/></svg>'],
+];
+const nowCell = i => (i.now ? [badge("now " + (IBOX.find(b => b[0] === i.now.key)?.[3] || ""), i.now.label), " ", i.now.text] : "");
+const imgUrl = (i, at) => `/api/issues/${i.id}/image?v=${encodeURIComponent(at ?? i.image_at ?? "")}`;
+// 첨부 이미지 크게 보기 (바깥 · Esc로 닫기)
+function imageView(i, at) {
+  const bg = h("div", { class: "imgview", title: "눌러서 닫기" }, h("div", { class: "imgview-cap" }, h("b", {}, i.no), " ", i.title || "", h("span", { class: "muted" }, "  · 눌러서 닫기 (Esc)")), h("img", { src: imgUrl(i, at), alt: "첨부 이미지" }));
+  const key = e => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  const close = () => { bg.remove(); document.removeEventListener("keydown", key, true); };
+  bg.addEventListener("click", close); document.addEventListener("keydown", key, true);
+  document.body.append(bg);
+}
+// 큰 이미지는 긴 변 1920px로 줄임 (글자가 선명하게 PNG 우선 · 너무 크면 JPG)
+async function shrinkImage(file) {
+  if (file.type === "image/gif") return file;
+  let bmp; try { bmp = await createImageBitmap(file); } catch { return file; }
+  const mx = Math.max(bmp.width, bmp.height);
+  if (mx <= 1920 && file.size <= 4 * 1024 * 1024) return file;
+  const s = Math.min(1, 1920 / mx), c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
+  const blob = (t, q) => new Promise(r => c.toBlob(r, t, q));
+  let b = await blob("image/png"); if (!b || b.size > 3 * 1024 * 1024) b = await blob("image/jpeg", 0.9);
+  return b || file;
+}
+function issueActivity(i) {
+  const byUser = {};
+  for (const l of i.logs) (byUser[l.user_id] = byUser[l.user_id] || []).push(l);
+  const ids = Array.from(new Set([...i.members.map(m => m.user_id), ...Object.keys(byUser).map(Number)]));
+  return h("div", {}, ids.length ? ids.map(uid => {
+    const m = i.members.find(x => x.user_id === uid);
+    const logs = byUser[uid] || [];
+    return h("div", { class: "card", style: "margin-bottom:10px" },
+      h("div", { class: "row" }, h("b", {}, userName(uid)), badge("role", m?.role || "담당 해제"), h("span", { class: "muted small" }, `투입 ${fmtH(logs.reduce((a, l) => a + l.hours, 0))}h · 기록 ${logs.filter(l => l.text).length}건`)),
+      h("div", { class: "small", style: "margin:6px 0" }, `할 일: ${m?.duty || "-"}  ·  분류: ${m?.category || "-"}`),
+      logs.length ? h("div", { class: "timeline" }, logs.slice(0, 30).map(l => h("div", { class: "it" }, h("div", { class: "d" }, `${l.date} · ${fmtH(l.hours)}h`), h("div", { class: "pre" }, l.text || h("span", { class: "muted" }, "(시간만)"))))) : h("div", { class: "muted small" }, "기록 없음"));
+  }) : h("div", { class: "muted" }, "담당자가 없습니다."));
+}
+// 0.6.0: 이슈 창 — 왼쪽 이슈 정보(번호 ~ 부2 · 첨부 이미지), 오른쪽 진행 현황 4칸
+async function issueBoard(i0, after) {
+  const i = await api("GET", `/api/issues/${i0.id}`);
+  const can = i.canManage;
+  let changed = false, has = i.has_image, at = i.image_at;
+  const areas = {};
+  const dirty = () => IBOX.some(([k]) => areas[k].value !== (i[k] || ""));
+  const boxes = IBOX.map(([k, t, ask, cls, ic], n) => {
+    const ta = h("textarea", { readOnly: !can, placeholder: can ? ask : "", spellcheck: "false" }, i[k] || ""); areas[k] = ta;
+    const mt = i.box_meta?.[k];
+    return h("section", { class: "ibox " + cls }, h("div", { class: "ibox-hd" }, h("span", { class: "ibox-no" }, n + 1), h("span", { class: "ibox-ic", html: ic }), h("b", {}, t), h("span", { class: "ibox-q" }, ask), h("div", { class: "spacer" }),
+      mt?.at ? h("span", { class: "ibox-at", title: `마지막 수정 ${mt.at} · ${mt.by}` }, `${Number(mt.at.slice(5, 7))}/${Number(mt.at.slice(8, 10))} ${String(mt.by).split(" ")[0]}`) : ""), ta);
+  });
+  const kv = (k, v) => h("div", { class: "ikv" }, h("span", {}, k), h("div", {}, v));
+  const file = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", hidden: true });
+  const imgBox = h("div", { class: "iimg" });
+  const upload = async f => {
+    if (!can) return toast("이미지는 PL · 팀장만 올릴 수 있습니다", true);
+    if (!f || !String(f.type).startsWith("image/")) return toast("이미지 파일(PNG · JPG · WEBP · GIF)만 올릴 수 있습니다", true);
+    if (has && !(await confirmBox("이미 있는 이미지를 새 이미지로 바꿉니다.\n이전 이미지는 지워지고 되돌릴 수 없습니다."))) return;
+    try {
+      const b = await shrinkImage(f);
+      const r = await fetch(`/api/issues/${i.id}/image`, { method: "POST", headers: { "content-type": b.type || "application/octet-stream", "x-req": "1" }, body: b });
+      const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `오류 ${r.status}`);
+      has = true; at = d.image_at; changed = true; drawImg(); toast("이미지를 올렸습니다");
+    } catch (e) { toast(e.message, true); }
+  };
+  file.addEventListener("change", () => { const f = file.files[0]; file.value = ""; if (f) upload(f); });
+  const drawImg = () => imgBox.replaceChildren(
+    h("div", { class: "iimg-hd" }, h("b", {}, "첨부 이미지"), h("div", { class: "spacer" }),
+      can && has ? h("button", { class: "btn sm", onclick: () => file.click() }, "바꾸기") : "",
+      can && has ? h("button", { class: "btn sm danger", onclick: async () => { if (!(await confirmBox("첨부 이미지를 지웁니다. 되돌릴 수 없습니다."))) return; try { await api("DELETE", `/api/issues/${i.id}/image`); has = false; at = ""; changed = true; drawImg(); toast("이미지를 지웠습니다"); } catch (e) { toast(e.message, true); } } }, "지우기") : ""),
+    has ? h("img", { class: "iimg-th", src: imgUrl(i, at), alt: "첨부 이미지", title: "눌러서 크게 보기", onclick: () => imageView(i, at) })
+      : h("div", { class: "iimg-drop" + (can ? "" : " ro"), onclick: can ? () => file.click() : null }, can ? [h("div", {}, "이미지를 여기에 끌어다 놓거나"), h("div", {}, h("b", {}, "Ctrl + V"), " 로 붙여넣기"), h("div", { class: "muted small" }, "눌러서 파일 고르기 · 이슈당 한 장")] : "첨부 이미지가 없습니다"),
+    can && has ? h("div", { class: "muted small", style: "margin-top:4px" }, "새 이미지를 끌어다 놓거나 Ctrl + V 로 바꿀 수 있습니다") : "", file);
+  drawImg();
+  const side = h("aside", { class: "iside" },
+    kv("번호", h("b", { class: "ino" }, i.no)), kv("모델", `${i.model || "-"}${i.part ? ` (${i.part})` : ""}`), kv("발생처", i.source || "-"), kv("이슈명", h("b", {}, i.title)),
+    ...["정", "부1", "부2"].map(r => { const m = i.members.find(x => x.role === r); return kv(r, m ? [nameTag(m.name), m.duty ? h("div", { class: "small muted pre" }, m.duty) : ""] : h("span", { class: "muted" }, "-")); }),
+    kv("발생일", i.occurred || "-"), kv("Target", [i.target || "-", " ", badge(i.sched.cls, i.sched.text)]), kv("단계", `${M.stages[(i.stage || 1) - 1] || ""} · ${Math.round(i.progress * 100)}%`),
+    i.delay_reason || i.needDelay ? kv("지연 사유", i.needDelay ? badge("late", "입력 필요") : h("div", { class: "pre small" }, i.delay_reason)) : "",
+    imgBox,
+    h("div", { class: "row iside-btns" },
+      can ? h("button", { class: "btn sm", onclick: async () => { if (dirty()) return toast("칸에 쓴 내용을 먼저 저장해 주세요", true); close(); await issueForm(i, after); } }, "정보 · 담당 고치기") : "",
+      h("button", { class: "btn sm", onclick: () => modal(`${i.no} 담당별 투입 · 한 일 (${fmtH(i.hours.reduce((a, x) => a + x.h, 0))}h)`, issueActivity(i), []) }, "담당별 투입 · 한 일")));
+  const body = h("div", { class: "iboard" }, side, h("div", { class: "ibox-grid" }, boxes));
+  const top = () => { const all = document.querySelectorAll(".modal-bg"); return all.length && all[all.length - 1].contains(body); };
+  const onPaste = e => { if (!top() || !can) return; const f = [...(e.clipboardData?.files || [])].find(x => x.type.startsWith("image/")); if (!f) return; e.preventDefault(); upload(f); };
+  document.addEventListener("paste", onPaste);
+  const btns = can ? [{ text: "저장", cls: "pri", fn: async () => {
+    const b = {}; for (const [k] of IBOX) if (areas[k].value !== (i[k] || "")) b[k] = areas[k].value;
+    if (Object.keys(b).length) { await api("PUT", `/api/issues/${i.id}`, b); for (const k in b) i[k] = b[k]; changed = true; toast("저장했습니다"); }
+  } }] : [];
+  const close = modal([h("b", { class: "ino" }, i.no), h("span", {}, i.title), badge(i.sched.cls, i.sched.text), i.hidden ? badge("warn", "삭제됨") : "", h("span", { class: "muted small", style: "font-weight:400" }, can ? "진행 현황은 PL · 팀장 · 마스터가 씁니다" : "보기 전용")], body, btns,
+    { cls: "wide", noBgClose: can, beforeClose: async () => !dirty() || confirmBox("저장하지 않은 내용이 있습니다.\n저장하지 않고 닫을까요?"), onClose: () => { document.removeEventListener("paste", onPaste); if (changed) Promise.resolve(after?.()).catch(() => {}); } });
+  // 끌어다 놓기 (창 어디든)
+  const box = body.closest(".modal");
+  let dragN = 0;
+  box.addEventListener("dragenter", e => { if (!can || !e.dataTransfer?.types?.includes("Files")) return; e.preventDefault(); dragN++; imgBox.classList.add("drag"); });
+  box.addEventListener("dragover", e => { if (can && e.dataTransfer?.types?.includes("Files")) e.preventDefault(); });
+  box.addEventListener("dragleave", () => { dragN = Math.max(0, dragN - 1); if (!dragN) imgBox.classList.remove("drag"); });
+  box.addEventListener("drop", e => { if (!can) return; e.preventDefault(); dragN = 0; imgBox.classList.remove("drag"); const f = [...(e.dataTransfer?.files || [])].find(x => x.type.startsWith("image/")); if (f) upload(f); else toast("이미지 파일만 올릴 수 있습니다", true); });
+}
+function issueModal(i0, after) { return i0 ? issueBoard(i0, after) : issueForm(null, after); }
+// 새 이슈 등록 · 이슈 정보(모델 · 이슈명 · 일정 · 단계 · 담당 · 지연 사유) 고치기
+async function issueForm(i0, after) {
   const isNew = !i0;
-  const i = isNew ? { stage: 1, members: [], logs: [], hours: [], canManage: true, source: "내부", occurred: M.today } : await api("GET", `/api/issues/${i0.id}`);
+  const i = isNew ? { stage: 1, members: [], logs: [], hours: [], canManage: true, source: "내부", occurred: M.today } : (i0.logs ? i0 : await api("GET", `/api/issues/${i0.id}`));
   const can = i.canManage;
   const part = M.perms.admin ? "" : M.perms.plPart;
   const model = sel([["", "모델 선택"], ...modelsFor(part).concat(i.model_id && !modelsFor(part).some(m => m.id === i.model_id) ? M.models.filter(m => m.id === i.model_id) : []).map(m => [m.id, `${m.name} (${m.part})`])], i.model_id, { disabled: !can });
@@ -773,7 +930,6 @@ async function issueModal(i0, after) {
   const source = sel(["", "내부", "고객", "기타"], i.source, { disabled: !can });
   const occ = dateInput(i.occurred, { disabled: !can }), tgt = dateInput(i.target, { disabled: !can });
   const stage = sel(M.stages.map((s, k) => [k + 1, s]), i.stage, { disabled: !can });
-  const status = h("textarea", { disabled: !can, placeholder: "현상 · 원인 · 진행 · Action plan", rows: 5 }, i.status_text || "");
   const delay = h("textarea", { disabled: !can, placeholder: "목표일이 지났는데 끝나지 않은 이유" }, i.delay_reason || "");
   const note = h("textarea", { disabled: !can }, i.note || "");
   const imp = sel(["", "상", "중", "하"], i.importance, { disabled: !can });
@@ -788,24 +944,10 @@ async function issueModal(i0, after) {
   const form = h("div", { class: "form" }, ...field("번호", h("b", {}, i.no || "(저장하면 자동)")), ...field("모델", model), ...field("이슈명", title), ...field("발생처", source), ...field("발생일", occ), ...field("Target", tgt),
     ...field("단계 (PL)", stage), ...field("중요도", imp),
     h("label", { class: "full" }, "담당 · 할 일 (PL이 지정 → 각 담당자의 '내 이슈'에 할 일이 보임)"), h("div", { class: "full" }, memRows.map(r => r.el)),
-    ...field("진행현황", status), ...field("지연 사유" + (i.sched?.cls === "late" ? " ⚠" : ""), delay), ...field("비고", note),
+    ...field("지연 사유" + (i.sched?.cls === "late" ? " ⚠" : ""), delay), ...field("비고", note),
     i.plAssigned?.length ? h("div", { class: "full help warn" }, `PL(${i.plAssigned.join(", ")})이 담당으로 되어 있습니다. 재지정이 필요한지 확인해 주세요.`) : "",
-    !isNew ? h("div", { class: "full small muted" }, `원인 (정): ${i.cause || "-"}  /  대응 계획 (정): ${i.plan || "-"}`) : "");
-  let body = form;
-  if (!isNew) {
-    const byUser = {};
-    for (const l of i.logs) (byUser[l.user_id] = byUser[l.user_id] || []).push(l);
-    const ids = Array.from(new Set([...i.members.map(m => m.user_id), ...Object.keys(byUser).map(Number)]));
-    const act = h("div", {}, ids.length ? ids.map(uid => {
-      const m = i.members.find(x => x.user_id === uid);
-      const logs = byUser[uid] || [];
-      return h("div", { class: "card", style: "margin-bottom:10px" },
-        h("div", { class: "row" }, h("b", {}, userName(uid)), badge("role", m?.role || "담당 해제"), h("span", { class: "muted small" }, `투입 ${fmtH(logs.reduce((a, l) => a + l.hours, 0))}h · 기록 ${logs.filter(l => l.text).length}건`)),
-        h("div", { class: "small", style: "margin:6px 0" }, `할 일: ${m?.duty || "-"}  ·  분류: ${m?.category || "-"}`),
-        logs.length ? h("div", { class: "timeline" }, logs.slice(0, 30).map(l => h("div", { class: "it" }, h("div", { class: "d" }, `${l.date} · ${fmtH(l.hours)}h`), h("div", { class: "pre" }, l.text || h("span", { class: "muted" }, "(시간만)"))))) : h("div", { class: "muted small" }, "기록 없음"));
-    }) : h("div", { class: "muted" }, "담당자가 없습니다."));
-    body = tabbed([["f", "이슈 내용", form], ["a", `담당별 투입 · 오늘 한 일 (${fmtH(i.hours.reduce((a, x) => a + x.h, 0))}h)`, act]]);
-  }
+    h("div", { class: "full small muted" }, isNew ? "진행 현황 4칸(현상 · 원인 분석 · 개선검토 · 검증 및 적용)과 첨부 이미지는 등록한 뒤 이슈를 눌러 씁니다." : "진행 현황 4칸과 첨부 이미지는 이슈를 누르면 열리는 창에서 고칩니다."));
+  const body = form;
   const btns = [];
   if (can) btns.push({ text: "저장", cls: "pri", fn: async () => {
     const members = memRows.map(r => ({ role: r.role, user_id: r.s.value ? Number(r.s.value) : null, duty: r.duty.value, category: r.cat.value })).filter(x => x.user_id);
@@ -816,7 +958,7 @@ async function issueModal(i0, after) {
       if (!wasSame) { if (!(await confirmBox(pls.map(x => `${x.role}이(가) PL입니다 (${userName(x.user_id)}).`).join("\n") + "\n정말 입력하시겠습니까?"))) return false; }
       confirm_pl = true;
     }
-    const b = { model_id: Number(model.value) || null, title: title.value, source: source.value, occurred: occ.value, target: tgt.value, stage: Number(stage.value), status_text: status.value, delay_reason: delay.value, note: note.value, importance: imp.value, members, confirm_pl };
+    const b = { model_id: Number(model.value) || null, title: title.value, source: source.value, occurred: occ.value, target: tgt.value, stage: Number(stage.value), delay_reason: delay.value, note: note.value, importance: imp.value, members, confirm_pl };
     if (isNew) { const r = await api("POST", "/api/issues", b); toast(`${r.no} 등록했습니다`); }
     else { await api("PUT", `/api/issues/${i.id}`, b); toast("저장했습니다"); }
     await after();
@@ -826,7 +968,7 @@ async function issueModal(i0, after) {
     : { text: "삭제 (숨김)", cls: "danger", fn: async () => {
       const reason = await promptBox("삭제 사유", "예: 중복 등록, 잘못 만든 이슈"); if (!reason) return false;
       await api("POST", `/api/issues/${i.id}/hide`, { hidden: true, reason }); toast("숨겼습니다 (기록과 시간은 남음)"); await after(); } });
-  modal(isNew ? "새 이슈 등록" : `${i.no} ${i.title}`, body, btns);
+  modal(isNew ? "새 이슈 등록" : `${i.no} 정보 · 담당 고치기`, body, btns);
 }
 function promptBox(title, ph) {
   return new Promise(res => { const inp = h("input", { class: "inp", placeholder: ph }); let ok = false;
@@ -879,9 +1021,9 @@ async function pageAssign() {
   const part = M.perms.admin ? "" : M.perms.plPart;
   const people = M.users.filter(u => u.active && !u.gone && u.role !== "lead" && (!part || u.part === part));
   const title = h("input", { class: "inp", placeholder: "업무명 (예: B모델 EMC 대책 회로 검토)" });
-  const model = sel([["", "공통 (모델 없음)"], ...modelsFor(part).map(m => [m.id, `${m.name} (${m.part} · ${m.phase || "-"})`])], "", { class: "inp" });
+  const model = searchSel([["", "공통 (모델 없음)"], ...modelsFor(part).map(m => [m.id, `${m.name} (${m.part} · ${m.phase || "-"})`])], "");
   const st = dateInput(M.today), tg = dateInput("");
-  const imp = sel(["", "상", "중", "하"], "", { class: "inp" }), cat = sel([["", "-"], ...M.categories.map(c => [c.name, c.name])], "", { class: "inp" });
+  const imp = sel(["", "상", "중", "하"], "", { class: "inp" }), cat = searchSel([["", "-"], ...M.categories.map(c => [c.name, c.name])], "");
   const note = h("textarea", { class: "inp", rows: 3, placeholder: "할 일 · 참고 내용 (받는 사람 업무의 비고에 들어감)" });
   const checks = people.map(u => ({ u, el: h("input", { type: "checkbox" }) }));
   const form = h("div", { class: "card" }, h("div", { class: "form" }, ...field("업무명", title), ...field("모델", model), ...field("시작일", st), ...field("목표 마감일", tg), ...field("중요도", imp), ...field("업무 분류", cat), ...field("할 일 · 비고", note),
@@ -968,9 +1110,9 @@ async function pageSummary() {
   const s = await api("GET", "/api/summary");
   const c = s.count;
   const open = s.issues.filter(i => !(i.done || i.stage === 6));
-  const grp = (title, list, k) => [h("h2", { class: k ? "h-" + k : "" }, title, h("span", { class: "sub" }, list.length + "건")), h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["번호", "파트", "모델", "이슈명", "담당", "Target", "일정", "단계", "지연 사유"].map(x => h("th", {}, x)))),
-    h("tbody", {}, list.map(i => h("tr", { class: "click" + (k ? " r-" + k : ""), onclick: () => issueModal(i, pageSummary) }, h("td", {}, h("b", {}, i.no)), h("td", {}, i.part), h("td", {}, i.model), h("td", {}, i.title), h("td", { class: "small" }, i.members.map(m => `${m.role} ${m.name}`).join(" · ")),
-      h("td", {}, i.target || ""), h("td", {}, badge(i.sched.cls, i.sched.text)), h("td", {}, M.stages[(i.stage || 1) - 1]), h("td", { class: "small pre" }, i.needDelay ? badge("late", "필요") : i.delay_reason))))))];
+  const grp = (title, list, k) => [h("h2", { class: k ? "h-" + k : "" }, title, h("span", { class: "sub" }, list.length + "건")), h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["번호", "파트", "모델", "이슈명", "담당", "발생일", "Target", "일정", "단계", "현재 진행", "지연 사유"].map(x => h("th", {}, x)))),
+    h("tbody", {}, list.map(i => h("tr", { class: "click" + (k ? " r-" + k : ""), onclick: () => issueModal(i, pageSummary) }, h("td", {}, h("b", {}, i.no)), h("td", {}, i.part), h("td", {}, i.model), h("td", {}, i.title), h("td", { class: "small", title: i.members.map(m => `${m.role} ${m.name}`).join(" · ") }, ["정", "부1", "부2"].map(r => i.members.find(m => m.role === r)).filter(Boolean).map(m => String(m.name).split(" ")[0]).join(" · ")),
+      h("td", { class: "nowrap" }, i.occurred || ""), h("td", { class: "nowrap" }, i.target || ""), h("td", {}, badge(i.sched.cls, i.sched.text)), h("td", { class: "nowrap" }, M.stages[(i.stage || 1) - 1]), h("td", { class: "small pre status" }, nowCell(i)), h("td", { class: "small pre" }, i.needDelay ? badge("late", "필요") : i.delay_reason))))))];
   app().replaceChildren(h("h1", {}, "이슈 요약"),
     h("div", { class: "cards" }, [["진행", c.open], ["지연", c.late, "late"], ["임박", c.soon, "soon"], ["완료", c.done], ["지연 사유 미입력", c.needDelay, "late"]].map(([k, v, cl]) => h("div", { class: "card stat" + (cl && v ? " k-" + cl : "") }, h("div", { class: "k" }, k), h("div", { class: "v" }, v + "건")))),
     ...grp("지연", open.filter(i => i.sched.cls === "late"), "late"), ...grp("임박", open.filter(i => i.sched.cls === "soon"), "soon"), ...grp("진행", open.filter(i => !["late", "soon"].includes(i.sched.cls))));
@@ -1011,11 +1153,33 @@ async function pageMaster() {
         phase: sel(["", ...M.phases], m.phase, { class: "mini-in", disabled: ro }), customer: h("input", { class: "mini-in", value: m.customer || "", style: "width:90px", disabled: ro }), sop: dateInput(m.sop, { disabled: ro }),
         active: h("input", { type: "checkbox", checked: m.id ? m.active : true, disabled: ro }) };
       if (ro) return h("tr", { class: "muted" }, h("td", {}, r.name), h("td", {}, m.part), h("td", {}, r.grade), h("td", {}, r.phase), h("td", {}, r.customer), h("td", {}, r.sop), h("td", { class: "c" }, r.active), h("td", { class: "small" }, "🔒"));
-      const save = h("button", { class: "btn sm" + (m.id ? "" : " pri"), onclick: async () => { try { await api(m.id ? "PUT" : "POST", "/api/master/models", { id: m.id, name: r.name.value, part: r.part.value, grade: r.grade.value, phase: r.phase.value, customer: r.customer.value, sop: r.sop.value, active: r.active.checked }); toast("저장했습니다"); pageMaster(); } catch (e) { toast(e.message, true); } } }, m.id ? "저장" : "추가");
-      return h("tr", {}, h("td", {}, r.name), h("td", {}, r.part), h("td", {}, r.grade), h("td", {}, r.phase), h("td", {}, r.customer), h("td", {}, r.sop), h("td", { class: "c" }, r.active), h("td", {}, save));
+      if (m.hidden) for (const el of Object.values(r)) el.disabled = true;   // 삭제한 모델은 되살린 뒤 고침
+      const cells = [h("td", {}, r.name), h("td", {}, r.part), h("td", {}, r.grade), h("td", {}, r.phase), h("td", {}, r.customer), h("td", {}, r.sop), h("td", { class: "c" }, r.active)];
+      if (!m.id) {   // 새 줄: 아래 '새 모델 추가' 버튼으로 한 번에 넣음
+        const tr = h("tr", { class: "new-row" }, ...cells, h("td", { class: "nowrap" }, h("button", { class: "btn sm", title: "이 줄 빼기", onclick: () => { tr.remove(); newRows.splice(newRows.indexOf(r), 1); if (!newRows.length) addNew(); } }, "✕")));
+        newRows.push(r); return tr;
+      }
+      const hideBtn = m.hidden
+        ? h("button", { class: "btn sm", onclick: async () => { try { await api("POST", "/api/master/models/hide", { id: m.id, hidden: false }); toast("되살렸습니다"); pageMaster(); } catch (e) { toast(e.message, true); } } }, "되살리기")
+        : h("button", { class: "btn sm danger", onclick: async () => { if (!(await confirmBox(`'${m.name}' 모델을 삭제(숨김)합니다.\n모델 목록과 모델 고르기에서 빠집니다. 이 모델에 넣은 시간 · 이슈는 그대로 남고, '삭제한 모델 보기'에서 되살릴 수 있습니다.`))) return; try { await api("POST", "/api/master/models/hide", { id: m.id, hidden: true }); toast("삭제(숨김)했습니다"); pageMaster(); } catch (e) { toast(e.message, true); } } }, "삭제");
+      const save = h("button", { class: "btn sm", onclick: async () => { try { await api("PUT", "/api/master/models", { id: m.id, name: r.name.value, part: r.part.value, grade: r.grade.value, phase: r.phase.value, customer: r.customer.value, sop: r.sop.value, active: r.active.checked }); toast("저장했습니다"); pageMaster(); } catch (e) { toast(e.message, true); } } }, "저장");
+      return h("tr", { class: m.hidden ? "muted" : "" }, ...cells, h("td", { class: "nowrap" }, m.hidden ? [badge("warn", "삭제됨"), " "] : [save, " "], hideBtn));
     };
-    body.append(h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["모델명", "파트", "등급", "단계", "고객사", "양산 목표", "관리 (사용)", ""].map(x => h("th", {}, x)))), h("tbody", {}, M.models.map(mk), mk({})))),
-      h("div", { class: "help" }, "관리를 끄면 드롭다운과 업무로드 모델 칸에서 빠집니다 (기록은 남음). 모델은 지우지 않고 관리를 끕니다."));
+    const newRows = [];
+    const showHid = sessionStorage.getItem("mhid") === "1";
+    const nHid = M.models.filter(m => m.hidden).length;
+    const tb = h("tbody", {}, M.models.filter(m => showHid || !m.hidden).map(mk));
+    const addNew = () => { tb.append(mk({})); addBtn.textContent = `새 모델 ${newRows.length}줄 추가`; };
+    const addBtn = h("button", { class: "btn pri", onclick: async () => {
+      const items = newRows.filter(r => r.name.value.trim()).map(r => ({ name: r.name.value, part: r.part.value, grade: r.grade.value, phase: r.phase.value, customer: r.customer.value, sop: r.sop.value, active: r.active.checked }));
+      if (!items.length) return toast("새 줄에 모델명을 적어 주세요", true);
+      try { const d = await api("POST", "/api/master/models/bulk", { items }); toast(`모델 ${d.added.length}개를 추가했습니다`); pageMaster(); } catch (e) { toast(e.message, true); }
+    } }, "");
+    addNew();
+    body.append(h("div", { class: "row", style: "margin-bottom:8px" }, h("button", { class: "btn", onclick: addNew }, "+ 줄 추가"), addBtn, h("span", { class: "muted small" }, "맨 아래 빈 줄에 적습니다 · 여러 줄을 적고 한 번에 추가"), h("div", { class: "spacer" }),
+        h("label", { class: "small chk" }, h("input", { type: "checkbox", checked: showHid, onchange: e => { sessionStorage.setItem("mhid", e.target.checked ? "1" : "0"); pageMaster(); } }), ` 삭제한 모델 보기 (${nHid})`)),
+      h("div", { class: "tbl" }, h("table", { class: "models" }, h("thead", {}, h("tr", {}, ["모델명", "파트", "등급", "단계", "고객사", "양산 목표", "관리 (사용)", ""].map(x => h("th", {}, x)))), tb)),
+      h("div", { class: "help" }, "관리를 끄면 모델 고르기와 업무로드 모델 칸에서 빠지고 이 목록에는 남습니다. 삭제는 이 목록에서도 숨깁니다 (실제로 지우지 않음 · 넣은 시간과 이슈는 그대로 · '삭제한 모델 보기'에서 되살리기)."));
   }
   if (tab === "h") {
     const list = await api("GET", "/api/master/holidays");

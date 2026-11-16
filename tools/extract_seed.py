@@ -65,14 +65,26 @@ names = {p["name"] for p in people}
 # 이슈 정리
 reg = wb["이슈 정리"]
 regs = {}
+# 이슈 정리 열 배치: v1.8.0부터 정 · 부1 · 부2 · 맡은 일 · 단계 · 지연 사유 열이 생겨 번호 · Target · 진행현황 위치가 바뀜
+#   v1.7.x: G 정 · H 부(쉼표) · I Target · J 진행현황 · M 비고 · AF 완료일 · AJ 번호
+#   v1.8.x: G 정 · H 부1 · I 부2 · J~L 맡은 일 · M Target · N 진행현황 · O 단계 · Q 지연 사유 · R 비고 · S 처리 · AL 완료일 · AP 번호
+V18 = s(reg.cell(6, 8).value) == "부1" or s(reg.cell(6, 42).value) == "번호"
+print("이슈 정리 열 배치:", "v1.8.x" if V18 else "v1.7.x")
 for r in range(7, 107):
-    no = s(reg.cell(r, 36).value)
+    no = s(reg.cell(r, 42 if V18 else 36).value)
     if not no: continue
-    regs[no] = {"no": no, "model": s(reg.cell(r, 3).value), "source": s(reg.cell(r, 4).value), "title": s(reg.cell(r, 6).value),
-                "lead": s(reg.cell(r, 7).value), "subs": [x.strip() for x in s(reg.cell(r, 8).value).split(",") if x.strip()],
-                "target": d(reg.cell(r, 9).value), "status_text": s(reg.cell(r, 10).value), "note": s(reg.cell(r, 13).value),
-                "done": d(reg.cell(r, 32).value)}
-mx = s(reg["AJ2"].value)
+    if V18:
+        subs = [s(reg.cell(r, 8).value), s(reg.cell(r, 9).value)]
+        regs[no] = {"no": no, "model": s(reg.cell(r, 3).value), "source": s(reg.cell(r, 4).value), "occurred": d(reg.cell(r, 5).value), "title": s(reg.cell(r, 6).value),
+                    "lead": s(reg.cell(r, 7).value), "subs": subs, "duties": {"정": s(reg.cell(r, 10).value), "부1": s(reg.cell(r, 11).value), "부2": s(reg.cell(r, 12).value)},
+                    "target": d(reg.cell(r, 13).value), "status_text": s(reg.cell(r, 14).value), "stage_name": s(reg.cell(r, 15).value),
+                    "delay_reason": s(reg.cell(r, 17).value), "note": s(reg.cell(r, 18).value), "proc": s(reg.cell(r, 19).value), "done": d(reg.cell(r, 38).value)}
+    else:
+        regs[no] = {"no": no, "model": s(reg.cell(r, 3).value), "source": s(reg.cell(r, 4).value), "title": s(reg.cell(r, 6).value),
+                    "lead": s(reg.cell(r, 7).value), "subs": [x.strip() for x in s(reg.cell(r, 8).value).split(",") if x.strip()],
+                    "target": d(reg.cell(r, 9).value), "status_text": s(reg.cell(r, 10).value), "note": s(reg.cell(r, 13).value),
+                    "done": d(reg.cell(r, 32).value)}
+mx = s(reg["AP2" if V18 else "AJ2"].value)
 seed["issue_seq"] = mx.replace("최대", "").strip() if mx else ""
 
 over = dict(x.split("=", 1) for x in a.override)
@@ -113,6 +125,7 @@ for p in people:
         if kind == "이슈":
             row["no"] = s(ws.cell(r, 31).value).split("|")[0].replace("해제", "").strip()
             row["released"] = "해제" in s(ws.cell(r, 31).value)
+            row["mgr"] = s(ws.cell(r, 24).value) == "이슈 관리 (PL)"
             row["stage"] = next((i + 1 for i, st in enumerate(seed["stages"]) if st["name"] and st["name"] == s(e)), None)
             issue_rows.append(row)
         else:
@@ -141,7 +154,7 @@ for no, g in sorted(issues.items()):
     subs = g["subs"]
     if len(subs) > 2: W.append(f"{no}: 부 담당 {len(subs)}명 → 부1 · 부2만 넣고 나머지 {', '.join(subs[2:])} 는 비고에 적음")
     members = [{"name": g["lead"], "role": "정"}] if g["lead"] else []
-    members += [{"name": n, "role": f"부{i + 1}"} for i, n in enumerate(subs[:2])]
+    members += [{"name": n, "role": f"부{i + 1}"} for i, n in enumerate(subs[:2]) if n]
     for x in members:
         if x["name"] in pl_of: W.append(f"{no}: PL {x['name']} 이 {x['role']} 담당으로 되어 있음 (새 규칙: PL은 담당 불가) → 그대로 가져옴 · 재지정 필요")
     mrow = {x["user"]: x for x in rows}
@@ -150,17 +163,21 @@ for no, g in sorted(issues.items()):
         x["category"] = rr["category"] if rr else ""
         # 맡은 일: 부 담당 비고 중 v1.7.7 정→부 맞추기 흔적('[이전 …]')은 빼고 가져옴
         x["duty"] = rr["note"] if rr and x["role"] != "정" and "[이전" not in rr["note"] else ""
+        if "duties" in g: x["duty"] = g["duties"].get(x["role"], "")      # v1.8.x: 이슈 정리 '맡은 일' 칸
+        if x["name"] not in names: W.append(f"{no}: {x['role']} '{x['name']}' 이(가) 인원 목록에 없음")
     for rr in rows:
         if rr["user"] not in [x["name"] for x in members]:
+            if rr.get("mgr") or rr.get("released"): continue      # PL 관리 행 · 담당 해제된 행: 담당이 아니고 시간만
             W.append(f"{no}: {rr['user']} 개인 시트에 이슈 행이 있지만 담당자 목록에 없음 → 시간만 가져옴")
     gm = g["model"] if g["model"] in mpart else ""   # 이슈 정리 모델 칸이 '(개인 시트에 없음)' 등이면 담당자 행 모델
     out.append({"no": no, "model": gm or (lead_row["model"] if lead_row else ""), "title": g["title"] or (lead_row["title"] if lead_row else ""),
-                "source": g["source"], "occurred": lead_row["start"] if lead_row else None, "target": g["target"] or (lead_row and (lead_row["revised"] or lead_row["target"])),
-                "stage": (lead_row or {}).get("stage") or 1, "status_text": g["status_text"], "note": g["note"] + (" / 부: " + ", ".join(subs[2:]) if len(subs) > 2 else ""),
+                "source": g["source"], "occurred": g.get("occurred") or (lead_row["start"] if lead_row else None), "delay_reason": g.get("delay_reason", ""), "target": g["target"] or (lead_row and (lead_row["revised"] or lead_row["target"])),
+                "stage": next((i + 1 for i, st in enumerate(seed["stages"]) if st["name"] and st["name"] == g.get("stage_name")), None) or (lead_row or {}).get("stage") or 1, "status_text": g["status_text"], "note": g["note"] + (" / 부: " + ", ".join(subs[2:]) if len(subs) > 2 else ""),
                 "cause": (lead_row or {}).get("cause", ""), "plan": (lead_row or {}).get("plan", ""),
                 "done": g["done"] or (lead_row or {}).get("done"), "importance": (lead_row or {}).get("importance", ""),
                 "members": members, "logs": [{"user": rr["user"], "hours": rr["hours"]} for rr in rows]})
 seed["issues"] = out
+seed["reg_layout"] = "v1.8" if V18 else "v1.7"
 json.dump(seed, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 print("people", len(people), "tasks", len(tasks), "issues", len(out), "warnings", len(W))
 for w in W: print(" -", w)

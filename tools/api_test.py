@@ -116,7 +116,7 @@ check("팀원은 지연 사유 못 씀 (권한 메시지)", st == 403 and "권�
 st, d = mem.req("PUT", f"/api/issues/{iid}", {"stage": 2})
 check("정 담당도 단계는 못 고침 (PL만)", st == 403 and "단계" in d.get("error", ""), d)
 st, d = mem.req("PUT", f"/api/issues/{iid}", {"cause": "I2C 마진"})
-check("정 담당은 원인 고침", st == 200, d)
+check("정 담당도 진행 현황 4칸은 못 고침 (0.6.0: PL · 팀장만)", st == 403, d)
 st, d = pl2.req("PUT", f"/api/issues/{iid}", {"stage": 2})
 check("PL은 단계 고침", st == 200 and d["stage"] == 2, d)
 st, d = login("강하준").req("PUT", f"/api/issues/{iid}", {"stage": 3})

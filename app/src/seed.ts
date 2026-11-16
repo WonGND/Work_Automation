@@ -280,11 +280,11 @@ export async function importWork(seed: any, from: string, to: string, dry = fals
       const keepWeb = !!iss && webEdited("이슈 수정", i.no);
       if (keepWeb) { R.webKeptIssues.push(`${i.no} ${iss.title}`); }
       else if (iss) {
-        run(`UPDATE issues SET model_id=?, title=?, source=?, occurred=?, target=?, stage=?, status_text=?, note=?, cause=?, plan=?, importance=?, done=? WHERE id=?`,
-          model, i.title, i.source, i.occurred, i.target, i.stage || 1, i.status_text, i.note, i.cause, i.plan, i.importance, i.done, iss.id); R.issuesUpd++;
+        run(`UPDATE issues SET model_id=?, title=?, source=?, occurred=?, target=?, stage=?, status_text=?, note=?, cause=?, plan=?, importance=?, done=?, delay_reason=CASE WHEN ?<>'' THEN ? ELSE delay_reason END WHERE id=?`,
+          model, i.title, i.source, i.occurred, i.target, i.stage || 1, i.status_text, i.note, i.cause, i.plan, i.importance, i.done, i.delay_reason || "", i.delay_reason || "", iss.id); R.issuesUpd++;
       } else {
-        const r = run(`INSERT INTO issues(no,model_id,title,source,occurred,target,stage,status_text,note,cause,plan,importance,done) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-          i.no, model, i.title, i.source, i.occurred, i.target, i.stage || 1, i.status_text, i.note, i.cause, i.plan, i.importance, i.done);
+        const r = run(`INSERT INTO issues(no,model_id,title,source,occurred,target,stage,status_text,note,cause,plan,importance,done,delay_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          i.no, model, i.title, i.source, i.occurred, i.target, i.stage || 1, i.status_text, i.note, i.cause, i.plan, i.importance, i.done, i.delay_reason || "");
         iss = { id: Number(r.lastInsertRowid) }; R.issuesNew++;
       }
       const old = q("SELECT * FROM issue_members WHERE issue_id=?", iss.id);

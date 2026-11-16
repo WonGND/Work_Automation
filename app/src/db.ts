@@ -6,6 +6,7 @@ import { join } from "node:path";
 export let db: Database;
 export let DATA_DIR = "";
 export let BACKUP_DIR = "";
+export let IMG_DIR = "";   // 0.6.0: 이슈 첨부 이미지 (DB 밖 · 자동 백업에 들어가지 않음)
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -57,6 +58,8 @@ export function openDb(dataDir: string) {
   BACKUP_DIR = join(dataDir, "백업");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(BACKUP_DIR, { recursive: true });
+  IMG_DIR = join(dataDir, "이미지");
+  mkdirSync(IMG_DIR, { recursive: true });
   db = new Database(join(dataDir, "업무관리.db"), { create: true });
   db.exec(SCHEMA);
   migrate();
@@ -112,6 +115,12 @@ function migrate() {
   addCol("tasks", "excel_key", "TEXT DEFAULT ''");
   addCol("users", "joined", "TEXT");                   // 0.5.6: 입사일 (이전 날짜는 기준 시간 · 미입력에서 빠짐)
   addCol("users", "left_on", "TEXT");                  // 0.5.6: 퇴사일 (다음 날부터 로그인 막힘 · 목록에서 숨김 · 기록은 남음)     // 0.5.1: 엑셀 행 (사람|행번호) — 엑셀에서 업무명을 바꿔도 같은 업무로 맞춤          // 0.3.0: 비밀번호 찾기용 회사 메일
+  // 0.6.0: 이슈 4칸 (현상 = status_text · 원인 분석 = cause · 개선검토 = plan · 검증 및 적용 = verify) · 칸별 마지막 수정 · 첨부 이미지 파일 이름 · 모델 숨김
+  addCol("issues", "verify", "TEXT DEFAULT ''");
+  addCol("issues", "box_meta", "TEXT DEFAULT '{}'");
+  addCol("issues", "image", "TEXT DEFAULT ''");
+  addCol("issues", "image_at", "TEXT DEFAULT ''");
+  addCol("models", "hidden", "INTEGER DEFAULT 0");
   db.exec(`CREATE TABLE IF NOT EXISTS notifs (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT, text TEXT, link TEXT DEFAULT '', created TEXT DEFAULT (datetime('now','localtime')), read INTEGER DEFAULT 0);
     CREATE INDEX IF NOT EXISTS ix_notif_user ON notifs(user_id, read);
     CREATE TABLE IF NOT EXISTS pw_resets (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, code_hash TEXT, expires TEXT, tries INTEGER DEFAULT 0, used INTEGER DEFAULT 0, created TEXT DEFAULT (datetime('now','localtime')));`);   // 0.2.1: 기본 행 구분 (이름을 고쳐도 같은 행)

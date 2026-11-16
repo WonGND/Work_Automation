@@ -1,12 +1,12 @@
 // API: 로그인 · 권한 · 업무 · 시간 · 이슈 · 업무로드 · 기준정보 · 관리
-import { db, q, q1, run, getSetting, setSetting, audit, backup, listBackups, BACKUP_DIR, notify, DATA_DIR } from "./db";
+import { db, q, q1, run, getSetting, setSetting, audit, backup, listBackups, BACKUP_DIR, notify, DATA_DIR, IMG_DIR } from "./db";
 import { enc, randCode, tempPw } from "./secret";
 import { sendMail, mailReady } from "./mail";
 import { ctx, personStats, periodRange, today, addDays, scheduleState, num, isWorkday, dow, weightOf } from "./calc";
 import { ensureFixedRows, importWork } from "./seed";
 import { missReminder } from "./remind";
 import { join } from "node:path";
-import { existsSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 
 export class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 const err = (s: number, m: string) => { throw new HttpError(s, m); };
@@ -72,8 +72,24 @@ function meta(u: User) {
 function canSeeUser(u: User, uid: number) { return u.id === uid || isAdmin(u); }
 function partOfModel(modelId: number | null) { return modelId ? (q1("SELECT part FROM models WHERE id=?", modelId)?.part || "") : ""; }
 function canManageIssue(u: User, iss: any) { return isAdmin(u) || (isPL(u) && partOfModel(iss.model_id) === u.part); }
-function membersOf(issueId: number) { return q("SELECT m.*, u.name FROM issue_members m JOIN users u ON u.id=m.user_id WHERE issue_id=? ORDER BY role", issueId); }
+function membersOf(issueId: number) { return q("SELECT m.*, u.name FROM issue_members m JOIN users u ON u.id=m.user_id WHERE issue_id=? ORDER BY CASE m.role WHEN '정' THEN 0 WHEN '부1' THEN 1 ELSE 2 END", issueId); }
 function stageDone(i: any) { return !!i.done || i.stage === 6; }
+// 0.6.0: 진행 현황 4칸 (기존 칸을 그대로 씀: 현상 = 진행현황 · 원인 분석 = 원인 · 개선검토 = 대응 계획 · 검증 및 적용 = 새 칸)
+export const BOXES: [string, string][] = [["status_text", "현상"], ["cause", "원인 분석"], ["plan", "개선검토"], ["verify", "검증 및 적용"]];
+const nowLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16).replace("T", " ");   // 서버 시간대(Asia/Seoul) 기준
+function boxMeta(i: any) { try { const o = JSON.parse(i.box_meta || "{}"); return o && typeof o === "object" ? o : {}; } catch { return {}; } }
+// 이슈 요약 '현재 진행' = 내용이 있는 가장 뒤 칸
+function nowBox(i: any) { for (let k = BOXES.length - 1; k >= 0; k--) { const t = str(i[BOXES[k][0]], 4000); if (t) return { key: BOXES[k][0], label: BOXES[k][1], text: t }; } return null; }
+const IMG_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
+function sniffImage(b: Uint8Array): string {
+  if (b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "png";
+  if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "jpg";
+  if (b.length > 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "webp";
+  if (b.length > 6 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return "gif";
+  return "";
+}
+function imgPath(name: string) { return /^[0-9]+\.(png|jpg|webp|gif)$/.test(name || "") ? join(IMG_DIR, name) : ""; }
+function dropImage(name: string) { const f = imgPath(name); if (f && existsSync(f)) { try { unlinkSync(f); } catch {} } }
 
 function issueRow(i: any, c = ctx()) {
   const mem = membersOf(i.id);
@@ -81,7 +97,8 @@ function issueRow(i: any, c = ctx()) {
   const tot = q("SELECT user_id, SUM(hours) h, COUNT(CASE WHEN text<>'' THEN 1 END) n, MAX(CASE WHEN text<>'' THEN date END) last FROM issue_logs WHERE issue_id=? GROUP BY user_id", i.id);
   const st = scheduleState(i.target, i.done, stageDone(i));
   const plUsers = new Set(q("SELECT id FROM users WHERE role='pl'").map((x: any) => x.id));
-  return { ...i, model: m?.name || "", part: m?.part || "", members: mem, hours: tot, sched: st,
+  const f = imgPath(i.image);
+  return { ...i, box_meta: boxMeta(i), now: nowBox(i), has_image: !!f && existsSync(f), model: m?.name || "", part: m?.part || "", members: mem, hours: tot, sched: st,
     progress: (c.stagePct[(i.stage || 1) - 1] ?? 0),
     needDelay: st.cls === "late" && !str(i.delay_reason),
     plAssigned: mem.filter((x: any) => plUsers.has(x.user_id)).map((x: any) => x.name) };
@@ -131,8 +148,8 @@ function checkHours(h: any) {
   return v;
 }
 
-function weekData(uid: number, from: string) {
-  const c = ctx(); const days = Array.from({ length: 7 }, (_, k) => addDays(from, k)); const to = days[6];
+function weekData(uid: number, from: string, n = 7) {   // n = 7 (주간) 또는 그 달의 날 수 (0.6.0 월간)
+  const c = ctx(); const days = Array.from({ length: n }, (_, k) => addDays(from, k)); const to = days[n - 1];
   const t = today(); const hstart = getSetting("hstart", "2026-10-12");
   const tasks = q(`SELECT * FROM tasks WHERE user_id=? AND (hidden=0 OR id IN (SELECT task_id FROM task_hours WHERE date BETWEEN ? AND ?)) ORDER BY fixed DESC, ord, id`, uid, from, to);
   const rows: any[] = [];
@@ -236,7 +253,7 @@ function dashboard(from: string, to: string) {
     }
     pr.models = [...mset].filter(x => x !== "공통·기타").length; pr.cross = cross;
   }
-  const modelCols = [...c.models.values()].filter((m: any) => m.active).sort((a: any, b: any) => {
+  const modelCols = [...c.models.values()].filter((m: any) => m.active && !m.hidden).sort((a: any, b: any) => {
     const g = (m: any) => (["ES", "DV", "PD", "PV"].includes(m.phase) ? 0 : m.phase === "선행검토" ? 1 : m.phase === "양산" ? 2 : 3);
     return g(a) - g(b) || String(a.part).localeCompare(String(b.part)) || a.ord - b.ord;
   }).map((m: any) => ({ id: m.id, name: m.name, part: m.part, phase: m.phase, grade: m.grade, weight: weightLabel(c, m) }));
@@ -260,7 +277,8 @@ function issueSummary() {
 export async function handle(req: Request, url: URL): Promise<Response> {
   const p = url.pathname, m = req.method;
   if (m !== "GET" && req.headers.get("x-req") !== "1") err(403, "잘못된 요청입니다");
-  const body = m === "GET" ? {} : await req.json().catch(() => ({}));
+  const isImgUp = m === "POST" && /^\/api\/issues\/\d+\/image$/.test(p);   // 이미지는 파일 내용 그대로 올림
+  const body = m === "GET" || isImgUp ? {} : await req.json().catch(() => ({}));
 
   if (p === "/api/login" && m === "POST") {
     const login = str(body.login, 50); const u = q1("SELECT * FROM users WHERE login=?", login);
@@ -493,7 +511,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
   }
   if (p === "/api/notifs" && m === "GET") {
     // rev: 모두가 같이 보는 정보(계정 · 모델 · 기준 · 이슈 · 지정)가 마지막으로 바뀐 번호 → 화면이 이 값이 바뀌면 다시 읽음
-    const rev = q1(`SELECT IFNULL(MAX(id),0) n FROM audit WHERE action IN ('계정 수정','계정 추가','공휴일 추가','공휴일 삭제','기준값 수정','기준정보 배율','등급 추가','업무 분류 추가','업무 지정','엑셀 가져오기','seed 추가 반영','이슈 등록','이슈 수정','이슈 삭제(숨김)','이슈 되살리기','판정 문구 수정','휴직 수정','휴직 추가','모델 추가','모델 수정')`)?.n || 0;
+    const rev = q1(`SELECT IFNULL(MAX(id),0) n FROM audit WHERE action IN ('계정 수정','계정 추가','공휴일 추가','공휴일 삭제','기준값 수정','기준정보 배율','등급 추가','업무 분류 추가','업무 지정','엑셀 가져오기','seed 추가 반영','이슈 등록','이슈 수정','이슈 삭제(숨김)','이슈 되살리기','판정 문구 수정','휴직 수정','휴직 추가','모델 추가','모델 수정','모델 삭제(숨김)','모델 되살리기','이슈 이미지')`)?.n || 0;
     return json({ rev, unread: q1("SELECT COUNT(*) n FROM notifs WHERE user_id=? AND read=0", me.id)?.n || 0, list: q("SELECT * FROM notifs WHERE user_id=? ORDER BY id DESC LIMIT 60", me.id) });
   }
   if (p === "/api/notifs/read" && m === "POST") {
@@ -509,6 +527,10 @@ export async function handle(req: Request, url: URL): Promise<Response> {
   if (p === "/api/week" && m === "GET") {
     const uid = Number(url.searchParams.get("user") || me.id); if (!canSeeUser(me, uid)) err(403, "볼 수 없습니다");
     let from = url.searchParams.get("from") || today(); if (!isDate(from)) err(400, "날짜 오류");
+    if (url.searchParams.get("mode") === "month") {   // 0.6.0: 한 달 치 (1일 ~ 말일)
+      const [f, t] = periodRange("month", from!);
+      return json({ ...weekData(uid, f, Number(t.slice(8, 10))), mode: "month" });
+    }
     from = addDays(from, -((dow(from) + 6) % 7));
     return json(weekData(uid, from));
   }
@@ -572,23 +594,53 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     let id = 0, no = "";
     db.transaction(() => {
       no = nextIssueNo();
-      const r = run(`INSERT INTO issues(no,model_id,title,source,occurred,target,stage,status_text,note,importance,created_by) VALUES(?,?,?,?,?,?,1,?,?,?,?)`,
-        no, model_id, title, str(body.source, 20), dOrNull(body.occurred) || today(), dOrNull(body.target), str(body.status_text), str(body.note), str(body.importance, 5), me.id);
+      const meta: any = {}; const stamp = { at: nowLocal(), by: me.name };
+      for (const [k] of BOXES) if (str(body[k], 4000)) meta[k] = stamp;
+      const r = run(`INSERT INTO issues(no,model_id,title,source,occurred,target,stage,status_text,cause,plan,verify,box_meta,note,importance,created_by) VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?,?)`,
+        no, model_id, title, str(body.source, 20), dOrNull(body.occurred) || today(), dOrNull(body.target), str(body.status_text, 4000), str(body.cause, 4000), str(body.plan, 4000), str(body.verify, 4000), JSON.stringify(meta), str(body.note), str(body.importance, 5), me.id);
       id = Number(r.lastInsertRowid);
       setMembers(id, body.members || [], !!body.confirm_pl);
     })();
     audit(me.id, "이슈 등록", no, body);
     return json(issueRow(q1("SELECT * FROM issues WHERE id=?", id)));
   }
-  mt = p.match(/^\/api\/issues\/(\d+)(\/me|\/hide)?$/);
+  mt = p.match(/^\/api\/issues\/(\d+)(\/me|\/hide|\/image)?$/);
   if (mt) {
     const iss = q1("SELECT * FROM issues WHERE id=?", Number(mt[1])); if (!iss) err(404, "없는 이슈입니다");
     const mem = membersOf(iss.id); const myRole = mem.find((x: any) => x.user_id === me.id)?.role;
     const manage = canManageIssue(me, iss);
-    if (m === "GET") {
+    if (m === "GET" && !mt[2]) {
       if (!manage && !myRole) err(403, "볼 수 없습니다 (우리 파트 이슈 · 내가 담당인 이슈만)");
       const logs = q("SELECT l.*, u.name FROM issue_logs l JOIN users u ON u.id=l.user_id WHERE issue_id=? ORDER BY date DESC, u.ord", iss.id);
       return json({ ...issueRow(iss), logs, canManage: manage, myRole: myRole || "" });
+    }
+    // 0.6.0: 첨부 이미지 (이슈당 한 장 · 데이터 폴더의 '이미지' 폴더 · DB와 자동 백업에는 들어가지 않음)
+    if (mt[2] === "/image") {
+      if (m === "GET") {
+        if (!manage && !myRole) err(403, "볼 수 없습니다 (우리 파트 이슈 · 내가 담당인 이슈만)");
+        const f = imgPath(iss.image); if (!f || !existsSync(f)) err(404, "첨부 이미지가 없습니다");
+        return new Response(Bun.file(f), { headers: { "content-type": IMG_TYPES[iss.image.split(".").pop()!] || "application/octet-stream", "cache-control": "private, max-age=31536000", "content-disposition": "inline" } });
+      }
+      if (!manage) err(403, "이미지는 PL · 팀장만 올리고 지울 수 있습니다");
+      if (m === "POST") {
+        const buf = new Uint8Array(await req.arrayBuffer());
+        if (!buf.length) err(400, "이미지 내용이 없습니다");
+        if (buf.length > 8 * 1024 * 1024) err(413, "이미지가 너무 큽니다 (8MB 이하)");
+        const ext = sniffImage(buf); if (!ext) err(400, "이미지 파일(PNG · JPG · WEBP · GIF)만 올릴 수 있습니다");
+        const name = `${iss.id}.${ext}`;
+        if (iss.image && iss.image !== name) dropImage(iss.image);
+        writeFileSync(join(IMG_DIR, name), buf);
+        const at = new Date().toISOString();
+        run("UPDATE issues SET image=?, image_at=?, updated=datetime('now','localtime') WHERE id=?", name, at, iss.id);
+        audit(me.id, "이슈 이미지", iss.no, { 작업: iss.image ? "바꿈" : "올림", 크기KB: Math.round(buf.length / 1024) });
+        return json({ ok: true, image_at: at });
+      }
+      if (m === "DELETE") {
+        dropImage(iss.image);
+        run("UPDATE issues SET image='', image_at='', updated=datetime('now','localtime') WHERE id=?", iss.id);
+        audit(me.id, "이슈 이미지", iss.no, { 작업: "지움" });
+        return json({ ok: true });
+      }
     }
     if (mt[2] === "/hide" && m === "POST") {
       if (!manage) err(403, "PL · 팀장만 지울 수 있습니다");
@@ -607,18 +659,20 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     if (m === "PUT") {
       const set: any = {};
       const want = (k: string) => k in body && String(body[k] ?? "") !== String(iss[k] ?? "");
-      const plOnly = ["title", "model_id", "source", "occurred", "target", "status_text", "delay_reason", "note", "importance", "done"];
+      const plOnly = ["title", "model_id", "source", "occurred", "target", "status_text", "cause", "plan", "verify", "delay_reason", "note", "importance", "done"];
+      const boxKeys = BOXES.map(b => b[0]);
       for (const k of plOnly) if (want(k)) {
         if (!manage) err(403, k === "delay_reason" ? "입력 권한이 없습니다 (지연 사유는 PL이 입력)" : `${NOPERM} (PL · 팀장만 고칠 수 있는 칸)`);
-        set[k] = ["occurred", "target", "done"].includes(k) ? dOrNull(body[k]) : k === "model_id" ? (Number(body[k]) || null) : str(body[k], 2000);
+        set[k] = ["occurred", "target", "done"].includes(k) ? dOrNull(body[k]) : k === "model_id" ? (Number(body[k]) || null) : str(body[k], boxKeys.includes(k) ? 4000 : 2000);
+      }
+      if (boxKeys.some(k => k in set)) {   // 칸별 마지막 수정 (언제 · 누가)
+        const meta = boxMeta(iss); const stamp = { at: nowLocal(), by: me.name };
+        for (const k of boxKeys) if (k in set) meta[k] = stamp;
+        set.box_meta = JSON.stringify(meta);
       }
       if (set.model_id && isPL(me) && partOfModel(set.model_id) !== me.part) err(403, `${me.part} 모델만 고를 수 있습니다`);
       if ("title" in set && !set.title) err(400, "이슈명을 입력하세요");
       if (want("stage")) { if (!manage) err(403, `${NOPERM} (단계는 PL이 고칩니다)`); set.stage = Math.min(6, Math.max(1, Number(body.stage) || 1)); }
-      for (const k of ["cause", "plan"]) if (want(k)) {
-        if (!manage && myRole !== "정") err(403, `${NOPERM} (정 담당 · PL만 고칠 수 있는 칸)`);
-        set[k] = k === "stage" ? Math.min(6, Math.max(1, Number(body[k]) || 1)) : str(body[k], 2000);
-      }
       if (set.stage === 6 && !iss.done && !("done" in set)) set.done = today();
       if (set.stage && set.stage < 6 && iss.done && !("done" in set)) set.done = null;
       db.transaction(() => {
@@ -654,6 +708,31 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       audit(me.id, "기준정보 배율", "", body); return json({ ok: true });
     }
     if (m === "POST" && what === "grades") { const nm = str(body.name, 30); if (!nm) err(400, "이름"); run("INSERT OR IGNORE INTO grades(name,pct,ord) VALUES(?,?,(SELECT IFNULL(MAX(ord),0)+1 FROM grades))", nm, Number(body.pct) || 0); audit(me.id, "등급 추가", nm, body); return json({ ok: true }); }
+    // 0.6.0: 모델 여러 개 한 번에 추가 (하나라도 틀리면 아무것도 넣지 않음)
+    if (what === "models/bulk" && m === "POST") {
+      const items: any[] = Array.isArray(body.items) ? body.items.slice(0, 50) : []; if (!items.length) err(400, "추가할 모델이 없습니다");
+      const names: string[] = [];
+      db.transaction(() => {
+        for (const it of items) {
+          const v = { name: str(it.name, 60), part: str(it.part, 30), grade: str(it.grade, 30), phase: str(it.phase, 20), customer: str(it.customer, 60), sop: dOrNull(it.sop), active: it.active === false ? 0 : 1 };
+          if (!v.name) err(400, "모델명이 빈 줄이 있습니다");
+          if (isPL(me) && v.part !== me.part) err(403, `${v.name}: ${me.part} 모델만 추가할 수 있습니다`);
+          if (names.includes(v.name) || q1("SELECT 1 FROM models WHERE name=?", v.name)) err(400, `${v.name}: 같은 이름의 모델이 이미 있습니다 (삭제한 모델이면 '삭제한 모델 보기'에서 되살리세요)`);
+          run("INSERT INTO models(name,part,grade,phase,customer,sop,active,ord) VALUES(?,?,?,?,?,?,?,(SELECT IFNULL(MAX(ord),0)+1 FROM models))", v.name, v.part, v.grade, v.phase, v.customer, v.sop, v.active);
+          names.push(v.name);
+        }
+      })();
+      for (const n of names) audit(me.id, "모델 추가", n, items.find(x => str(x.name, 60) === n));
+      return json({ ok: true, added: names });
+    }
+    // 0.6.0: 모델 삭제 = 숨김 (목록 · 고르기에서 빠짐 · 넣은 시간과 이슈는 그대로) · 되살리기
+    if (what === "models/hide" && m === "POST") {
+      const md = q1("SELECT * FROM models WHERE id=?", Number(body.id)); if (!md) err(404, "없는 모델입니다");
+      if (isPL(me) && md.part !== me.part) err(403, `${me.part} 모델만 삭제 · 되살릴 수 있습니다`);
+      run("UPDATE models SET hidden=? WHERE id=?", body.hidden ? 1 : 0, md.id);
+      audit(me.id, body.hidden ? "모델 삭제(숨김)" : "모델 되살리기", md.name, "");
+      return json({ ok: true });
+    }
     if (what === "models" && (m === "POST" || m === "PUT")) {
       const v = { name: str(body.name, 60), part: str(body.part, 30), grade: str(body.grade, 30), phase: str(body.phase, 20), customer: str(body.customer, 60), sop: dOrNull(body.sop), active: body.active ? 1 : 0 };
       if (!v.name) err(400, "모델명을 입력하세요");
