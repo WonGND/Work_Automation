@@ -56,7 +56,7 @@ function modal(title, body, buttons, opts = {}) {
   const tryClose = async () => { if (opts.beforeClose && !(await opts.beforeClose())) return; close(); };
   const ft = h("div", { class: "ft" });
   for (const b of buttons || []) ft.append(h("button", { class: "btn " + (b.cls || ""), onclick: async () => { try { const r = await b.fn?.(); if (r !== false) close(); } catch (e) { toast(e.message, true); } } }, b.text));
-  ft.append(h("button", { class: "btn", onclick: tryClose }, "닫기"));
+  if (!opts.noClose) ft.append(h("button", { class: "btn", onclick: tryClose }, "닫기"));
   bg.append(h("div", { class: "modal" + (opts.cls ? " " + opts.cls : "") }, h("div", { class: "hd" }, title), h("div", { class: "bd" }, body), ft));
   bg.addEventListener("mousedown", e => { if (e.target === bg && !opts.noBgClose) close(); });
   document.body.append(bg);
@@ -326,12 +326,12 @@ async function boot(forcePw) {
   applyDark(getPref("dark", (() => { try { return localStorage.getItem("dark") || "0"; } catch { return "0"; } })()));
   $("#who").textContent = `${M.user.name} · ${roleKo[M.user.role]}${M.user.part ? " · " + M.user.part : ""}`;
   if (forcePw || M.user.must_change) { location.hash = "#/pw"; }
-  buildNav(); route(); setBell(M.notifUnread);
+  buildNav(); route(); setBell(M.notifUnread); knownRev = null; setTimeout(() => poll(), 400);   // 들어오자마자 팝업 확인
   if (!M.myEmail && !M.user.must_change) { try { if (!sessionStorage.getItem("emailTip")) { sessionStorage.setItem("emailTip", "1"); setTimeout(() => toast("비밀번호를 잊었을 때를 위해 오른쪽 위 '내 정보'에서 회사 메일을 등록해 주세요"), 1200); } } catch {} }
 }
 // ── 알림 (우상단 🔔) ──
 function setBell(n) { const b = $("#bellN"); b.hidden = !n; b.textContent = n > 99 ? "99+" : n; }
-const NK = { 업무: "📋", 이슈: "⚠", 요청: "✉", 버전: "⬆", 계정: "🔑", 미입력: "⏰" };
+const NK = { 업무: "📋", 이슈: "⚠", 요청: "✉", 버전: "⬆", 계정: "🔑", 미입력: "⏰", 공지: "📢" };
 async function openBell() {
   const pn = $("#bellPanel");
   if (!pn.hidden) { pn.hidden = true; return; }
@@ -351,15 +351,17 @@ document.addEventListener("click", e => { const pn = $("#bellPanel"); if (!pn.hi
 let knownRev = null, needRedraw = false, lastTouch = Date.now();
 for (const ev of ["keydown", "mousedown", "wheel", "touchstart"]) document.addEventListener(ev, () => { lastTouch = Date.now(); }, { passive: true, capture: true });
 const busy = () => !!document.querySelector(".modal-bg") || ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName) || Date.now() - lastTouch < 120000;
-setInterval(async () => {
-  if (!M || document.hidden || M.user.must_change) return;
+async function poll() {
+  if (!M || M.user.must_change) return;
   try {
-    const d = await api("GET", "/api/notifs"); setBell(d.unread);
+    const d = await api("GET", "/api/notifs"); setBell(d.unread); setDots(d.dots); showPops(d.pops);
     if (knownRev === null) knownRev = d.rev;
     else if (d.rev !== knownRev) { knownRev = d.rev; const role = M.user.role, part = M.user.part; M = await api("GET", "/api/meta"); if (M.user.role !== role || M.user.part !== part) buildNav(); needRedraw = true; }
     if (needRedraw && !busy()) { needRedraw = false; const y = window.scrollY; await route(); requestAnimationFrame(() => window.scrollTo(0, y)); }
   } catch {}
-}, 60000);
+}
+setInterval(() => { if (!document.hidden) poll(); }, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });   // 다른 창을 보다 돌아오면 바로 확인
 function buildNav() {
   const P = M.perms, items = [];
   if (P.sheet) items.push(["#/me", "내 업무"], ["#/myissues", "내 이슈"]);
@@ -368,8 +370,39 @@ function buildNav() {
   if (P.admin) items.push(["#/dash", "업무로드"], ["#/summary", "이슈 요약"], ["#/registry", "이슈 정리"], ["#/people", "사람별"]);
   if (P.std) items.push(["#/master", "기준정보"]);
   if (P.admin) items.push(["#/admin", "관리"]);
-  items.push(["#/requests", "요청"]);
-  $("#nav").replaceChildren(...items.map(([href, t]) => h("a", { href }, t, href === "#/requests" && M.reqPending ? h("span", { class: "nbadge" }, M.reqPending) : "")));
+  items.push(["#/notices", "공지"], ["#/requests", "요청"]);
+  const dot = { "#/me": M.dots?.me, "#/myissues": M.dots?.myissues };
+  $("#nav").replaceChildren(...items.map(([href, t]) => h("a", { href }, t, href === "#/requests" && M.reqPending ? h("span", { class: "nbadge" }, M.reqPending) : "", dot[href] ? h("i", { class: "ndot", title: "새로 지정됐거나 바뀐 것이 있습니다" }) : "")));
+  for (const a of document.querySelectorAll("nav a")) a.classList.toggle("on", (location.hash || "").startsWith(a.getAttribute("href")));
+}
+// 0.7.0: 빨간 점 — 탭을 열면 탭의 점이 꺼지고, 행을 누르면 행의 점이 꺼짐
+function setDots(d) { if (!M || !d) return; if (M.dots?.me !== d.me || M.dots?.myissues !== d.myissues) { M.dots = d; buildNav(); } }
+async function dotSeen(tab) { if (M.dots?.[tab]) { try { setDots((await api("POST", "/api/dots/seen", { tab })).dots); } catch {} } }
+async function dotClear(type, id) { try { setDots((await api("POST", "/api/dots/clear", { type, id })).dots); for (const el of document.querySelectorAll(`.rdot[data-k="${type}:${id}"]`)) el.remove(); } catch {} }
+const rdot = (type, id) => h("i", { class: "rdot", "data-k": `${type}:${id}`, title: "새로 지정됐거나 바뀌었습니다 · 누르면 표시가 꺼집니다" });
+// 0.7.0: 화면 가운데 팝업 — 공지 · 업무 지정/변경 · 이슈 담당 · 요청 · 업데이트 안내. '확인'을 눌러야 닫힘 (입력 중에는 입력이 끝난 뒤에 띄움)
+let popShown = false, popWait = null, lastKey = 0;
+document.addEventListener("keydown", () => { lastKey = Date.now(); }, true);
+const typingNow = () => ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName) && Date.now() - lastKey < 4000;
+const POPK = { "공지": ["📢", "notice"], "업데이트 안내": ["⬆", "ver"], "버전 공지 초안": ["⬆", "ver"], "업무 지정": ["📋", "task"], "업무 변경": ["📋", "task"], "이슈 담당 지정": ["⚠", "issue"], "이슈 담당 변경": ["⚠", "issue"], "이슈 담당 해제": ["⚠", "issue"] };
+function showPops(list) {
+  if (!list?.length || popShown) return;
+  if (typingNow()) { clearTimeout(popWait); popWait = setTimeout(() => showPops(list), 1500); return; }
+  popShown = true;
+  const ids = list.map(n => n.id);
+  const ack = async () => { try { const r = await api("POST", "/api/notifs/ack", { ids }); setBell(r.unread); } catch {} };
+  const card = n => {
+    const d = n.data || {}, what = d.what || n.kind, [ic, cls] = POPK[what] || (n.kind === "요청" ? ["✉", "req"] : ["•", ""]);
+    const rows = Object.entries(d).filter(([k, v]) => !["what", "by", "제목", "본문", "notice_id", "draft_id"].includes(k) && v !== "" && v != null);
+    return h("div", { class: "pop-it " + cls },
+      h("div", { class: "pop-hd" }, h("span", { class: "pop-ic" }, ic), h("b", {}, what), d.by ? h("span", { class: "pop-by" }, `${d.by}`) : "", h("div", { class: "spacer" }), h("span", { class: "muted small" }, n.created.slice(5, 16).replace("-", "/"))),
+      d["제목"] ? h("div", { class: "pop-ttl" }, d["제목"]) : h("div", { class: "pop-txt" }, n.text),
+      d["본문"] ? h("div", { class: "pop-body pre" }, d["본문"]) : "",
+      rows.length ? h("div", { class: "pop-kv" }, rows.map(([k, v]) => [h("span", {}, k), h("div", { class: "pre" }, String(v))])) : "",
+      n.link ? h("div", { class: "pop-go" }, h("button", { class: "link2", onclick: async () => { await ack(); close(); if (location.hash === n.link) route(); else location.hash = n.link; } }, { "#/me": "내 업무로 가기 →", "#/myissues": "내 이슈로 가기 →", "#/requests": "요청으로 가기 →", "#/notices": "공지로 가기 →" }[n.link] || "바로 가기 →")) : "");
+  };
+  const close = modal([h("span", {}, "알림"), h("span", { class: "nbadge", style: "position:static;margin-left:4px" }, list.length)], h("div", { class: "pop-list" }, list.map(card)),
+    [{ text: "확인", cls: "pri", fn: ack }], { cls: "pop", noBgClose: true, noClose: true, onClose: () => { popShown = false; setTimeout(() => poll().catch(() => {}), 300); } });
 }
 $("#btnOut").addEventListener("click", async () => { try { await api("POST", "/api/logout", {}); } catch {} M = null; showLogin(); });
 $("#btnPw").addEventListener("click", () => { location.hash = "#/pw"; });
@@ -412,6 +445,7 @@ async function route() {
     if (hs === "#/master") return pageMaster();
     if (hs === "#/admin") return pageAdmin();
     if (hs === "#/requests") return pageRequests();
+    if (hs === "#/notices") return pageNotices();
     location.hash = M.perms.sheet ? "#/me" : "#/dash";
   } catch (e) { app().replaceChildren(h("div", { class: "card err" }, e.message)); }
 }
@@ -483,6 +517,7 @@ async function pageMe(uid, readonly) {
   const statBox = h("div"), weekBox = h("div"), taskBox = h("div");
   let statT = 0; weekBox.addEventListener("hours-saved", () => { clearTimeout(statT); statT = setTimeout(() => loadStats().catch(() => {}), 600); });
   const refresh = async () => { await Promise.all([loadStats(), renderWeek(weekBox, uid, readonly, refresh), renderTasks(taskBox, uid, readonly, refresh)]); };
+  if (!readonly && uid === M.user.id) dotSeen("me");
   const head = h("div", { class: "row page-hd" }, h("h1", {}, readonly ? `${u.name}` : "내 업무", h("span", { class: "sub" }, `${u.part} · ${roleKo[u.role]}`)), h("div", { class: "spacer" }));
   const loadStats = async () => {
     const s = await api("GET", `/api/stats?user=${uid}&${perQs()}`);
@@ -588,10 +623,11 @@ async function renderWeek(box, uid, readonly, refreshAll) {
     const my = ri++;
     const tds = w.days.map((d, ci) => { const c = cell(r, d, my, ci); c.setTot(upd); return c.td; });
     upd();
-    const open = () => r.type === "issue" ? issueModal({ id: r.id }, again) : taskModal({ id: r.id }, readonly, refreshAll);
+    const dotEl = r.flag && !readonly ? rdot(r.type, r.id) : "";
+    const open = () => { if (dotEl) dotClear(r.type, r.id); return r.type === "issue" ? issueModal({ id: r.id }, again) : taskModal({ id: r.id }, readonly, refreshAll); };
     const name = h("td", { class: "name" },
       drag && !readonly ? dragHandle() : "",
-      h("span", { class: "t lnk", role: "button", title: (r.duty ? `할 일 (PL): ${r.duty}\n` : "") + "눌러서 내용 보기", onclick: open }, r.type === "issue" ? [h("b", {}, r.no + " "), r.title] : r.title),
+      h("span", { class: "t lnk", role: "button", title: (r.duty ? `할 일 (PL): ${r.duty}\n` : "") + "눌러서 내용 보기", onclick: open }, dotEl, r.type === "issue" ? [h("b", {}, r.no + " "), r.title] : r.title),
       h("span", { class: "m" }, r.type === "issue" ? [badge(r.released ? "warn" : "role", r.role), " ", r.model || "공통"] : [r.kind, r.model ? " · " + r.model : r.fixed ? " · 기본 행" : " · 공통"],
         r.assigned ? [" ", badge("pl", "PL 지정")] : "", r.hidden ? [" ", badge("warn", "삭제됨")] : "", r.done ? [" ", badge("done", "완료")] : ""));
     target.append(h("tr", { "data-id": r.id }, name, tds, tot));
@@ -640,9 +676,9 @@ async function renderTasks(box, uid, readonly, refreshAll) {
   const seg = h("div", { class: "seg" }, [["open", "진행 중"], ["done", `완료 (${nDone})`], ["all", "전체"], ["hidden", "삭제한 업무"]].map(([k, t]) =>
     h("button", { class: filter === k ? "on" : "", onclick: () => { box.dataset.f = k; renderTasks(box, uid, readonly, refreshAll); } }, t)));
   const canDrag = !readonly && filter === "open";
-  const rows = shown.map(t => h("tr", { class: "click" + (t.hidden ? " muted" : ""), "data-id": t.fixed ? "" : t.id, onclick: () => taskModal(t, readonly, refreshAll) },
+  const rows = shown.map(t => h("tr", { class: "click" + (t.hidden ? " muted" : ""), "data-id": t.fixed ? "" : t.id, onclick: e => { if (e.currentTarget.querySelector(".rdot")) dotClear("task", t.id); taskModal(t, readonly, refreshAll); } },
     h("td", { class: "nowrap c" }, canDrag && !t.fixed ? dragHandle() : "", t.kind), h("td", {}, modelName(t.model_id) || "공통"),
-    h("td", {}, t.title, t.fixed ? [" ", badge("", "기본 행")] : "", t.assigned_name ? [" ", badge("pl", `PL 지정 · ${t.assigned_name.split(" ")[0]}`)] : "", t.notes ? [" ", h("span", { class: "muted small" }, `✎${t.notes}`)] : ""),
+    h("td", {}, t.flag && !readonly ? rdot("task", t.id) : "", t.title, t.fixed ? [" ", badge("", "기본 행")] : "", t.assigned_name ? [" ", badge("pl", `PL 지정 · ${t.assigned_name.split(" ")[0]}`)] : "", t.notes ? [" ", h("span", { class: "muted small" }, `✎${t.notes}`)] : ""),
     h("td", { class: "num" }, t.kind === "통상" ? (t.progress ?? 0) + "%" : ""), h("td", {}, t.start || ""), h("td", {}, t.target || ""),
     h("td", {}, badge(t.sched.cls, t.sched.text)), h("td", {}, t.done || ""), h("td", { class: "c" }, t.importance), h("td", { class: "small" }, t.category),
     h("td", { class: "small pre" }, t.note), h("td", { class: "num" }, fmtH(t.total))));
@@ -670,8 +706,10 @@ async function taskModal(t0, readonly, after) {
   const st = dateInput(t.start, { disabled: dis }), tg = dateInput(t.target, { disabled: dis }), dn = dateInput(t.done, { disabled: dis });
   const imp = sel(["", "상", "중", "하"], t.importance, { disabled: dis });
   const cat = searchSel([["", "-"], ...M.categories.map(c => [c.name, c.name])], t.category, { disabled: dis });
+  const sumIn = !isNew && t.assigned_by === M.user.id && t.user_id !== M.user.id ? h("input", { value: t.summary || "", maxLength: 200, placeholder: "간략한 요약 (받는 사람 팝업에 보임)" }) : null;
   const note = h("textarea", { disabled: dis }, t.note || "");
-  const form = h("div", { class: "form" }, t.fixed && !readonly ? h("div", { class: "full help" }, "기본 행입니다. 이름 · 모델 · 분류 · 비고는 고칠 수 있고, 구분(기타 · 휴가 · 조퇴)은 계산에 쓰여 바꿀 수 없습니다.") : "", t.assigned_name ? h("div", { class: "full help" }, `${t.assigned_name} 이(가) 지정한 업무입니다.`) : "",
+  const form = h("div", { class: "form" }, t.fixed && !readonly ? h("div", { class: "full help" }, "기본 행입니다. 이름 · 모델 · 분류 · 비고는 고칠 수 있고, 구분(기타 · 휴가 · 조퇴)은 계산에 쓰여 바꿀 수 없습니다.") : "", t.assigned_name ? h("div", { class: "full help" }, `${t.assigned_name} 이(가) 지정한 업무입니다.`, t.summary && t.assigned_by !== M.user.id ? h("div", { class: "pre", style: "margin-top:4px" }, h("b", {}, "요약  "), t.summary) : "") : "",
+    ...(sumIn ? field("요약 (지정한 사람)", sumIn) : []),
     ...field("구분", kind), ...field("모델", model), ...field("업무명", title), ...field("진행률 (통상)", prog),
     ...field("시작일", st), ...field("목표 마감일", tg), ...field("실제 마감일", dn), ...field("중요도", imp), ...field("업무 분류", cat), ...field("비고", note));
   let body = form;
@@ -698,6 +736,7 @@ async function taskModal(t0, readonly, after) {
   const btns = readonly ? [] : [{ text: "저장", cls: "pri", fn: async () => {
     const b = { kind: kind.value, model_id: model.value ? Number(model.value) : null, title: title.value, progress: kind.value === "통상" ? (prog.value === "" ? null : Number(prog.value)) : null,
       start: st.value, target: tg.value, done: dn.value, importance: imp.value, category: cat.value, note: note.value };
+    if (sumIn) b.summary = sumIn.value;
     if (isNew) {
       b.hours = [];
       for (const o of hrows) {
@@ -728,7 +767,8 @@ function tabbed(list) {
 // ── 내 이슈 (접고 펴기) ──
 async function pageMyIssues() {
   const list = await api("GET", "/api/issues?scope=mine");
-  const full = await Promise.all(list.map(i => api("GET", `/api/issues/${i.id}`)));
+  dotSeen("myissues");
+  const full = (await Promise.all(list.map(i => api("GET", `/api/issues/${i.id}`)))).map((x, k) => ({ ...x, mflag: list[k].mflag }));
   const open = full.filter(i => !(i.done || i.stage === 6)), done = full.filter(i => i.done || i.stage === 6);
   const root = h("div", {}, h("div", { class: "row page-hd" }, h("h1", {}, "내 이슈", h("span", { class: "sub" }, `진행 ${open.length} · 완료 ${done.length}`)), h("div", { class: "spacer" }),
     h("button", { class: "btn sm", onclick: () => { for (const c of root.querySelectorAll(".issue-card")) c.classList.add("open"); } }, "모두 펴기"),
@@ -750,10 +790,11 @@ function issueCard(i) {
   const mine = i.logs.filter(l => l.user_id === M.user.id);
   const logToday = e => { e.stopPropagation(); logModal({ type: "issue", id: i.id, no: i.no, title: i.title, duty: my?.duty, hours: Object.fromEntries(mine.map(l => [l.date, l.hours])), texts: Object.fromEntries(mine.map(l => [l.date, l.text])) }, M.today, false, () => route()); };
   const card = h("div", { class: "issue-card" });
-  const top = h("div", { class: "top" }, h("span", { class: "car" }, "▸"), h("span", { class: "no" }, i.no), h("span", { class: "ttl" }, i.title), badge("role", my?.role), badge(i.sched.cls, i.sched.text), h("span", { class: "muted small" }, M.stages[(i.stage || 1) - 1] || ""),
+  const dotEl = i.mflag ? rdot("issue", i.id) : "";
+  const top = h("div", { class: "top" }, h("span", { class: "car" }, "▸"), dotEl, h("span", { class: "no" }, i.no), h("span", { class: "ttl" }, i.title), badge("role", my?.role), badge(i.sched.cls, i.sched.text), h("span", { class: "muted small" }, M.stages[(i.stage || 1) - 1] || ""),
     i.needDelay ? badge("late", "지연 사유 미입력 (PL)") : "", h("div", { class: "spacer" }), h("span", { class: "muted small" }, `내 투입 ${fmtH(i.hours.find(x => x.user_id === M.user.id)?.h || 0)}h`),
     h("button", { class: "btn sm pri", onclick: logToday }, "오늘 한 일"));
-  top.addEventListener("click", () => card.classList.toggle("open"));
+  top.addEventListener("click", () => { card.classList.toggle("open"); if (dotEl && dotEl.isConnected) dotClear("issue", i.id); });
   const body = h("div", { class: "ic-body" },
     h("div", { class: "duty" }, h("b", {}, "할 일 (PL 지정)"), h("div", { class: "pre" }, my?.duty || h("span", { class: "muted" }, "PL이 아직 적지 않았습니다"))),
     h("div", { class: "kv" }, h("div", {}, h("b", {}, "모델"), `${i.model} (${i.part})`), h("div", {}, h("b", {}, "발생처"), i.source || "-"), h("div", {}, h("b", {}, "발생일"), i.occurred || "-"),
@@ -991,6 +1032,50 @@ function requestModal(toId) {
     [{ text: "보내기", cls: "pri", fn: async () => { await api("POST", "/api/requests", { to_id: pick, text: txt.value }); toast("요청을 보냈습니다 · '요청' 메뉴에서 처리 상태를 볼 수 있습니다"); } }]);
   setTimeout(() => txt.focus(), 50);
 }
+// ── 0.7.0: 공지 ── 마스터 · 팀장이 전체 · 파트 · 개인에게 보냄 (받은 사람 화면 가운데 팝업) · 지난 공지 보기
+function noticeForm(draft, after) {
+  const title = h("input", { value: draft?.title || "", maxLength: 100, placeholder: "제목 (예: 11/20(금) 업무관리 입력 마감 안내)" });
+  const body = h("textarea", { rows: draft ? 9 : 6, maxLength: 2000, placeholder: "핵심만 간단히 적어 주세요" }, draft?.body || "");
+  const people = M.users.filter(u => u.active && !u.gone);
+  const parts = M.parts.filter(p => people.some(u => u.part === p));
+  let mode = "all";
+  const pchk = parts.map(p => ({ p, el: h("input", { type: "checkbox" }) }));
+  const uchk = people.map(u => ({ u, el: h("input", { type: "checkbox" }) }));
+  const boxP = h("div", { class: "picks" }, pchk.map(c => h("label", { class: "pick" }, c.el, " ", c.p, h("small", { class: "muted" }, ` ${people.filter(u => u.part === c.p).length}명`))));
+  const boxU = h("div", {}, [...parts, ""].map(p => { const us = uchk.filter(c => (c.u.part || "") === p || (p === "" && !parts.includes(c.u.part))); return us.length ? h("div", { class: "picks", style: "margin-bottom:4px" }, h("small", { class: "muted", style: "min-width:76px" }, p || "기타"), us.map(c => h("label", { class: "pick" }, c.el, " ", c.u.name))) : ""; }));
+  const cnt = h("span", { class: "muted small" });
+  const tgBox = h("div");
+  const count = () => { const n = mode === "all" ? people.length : mode === "parts" ? people.filter(u => pchk.some(c => c.el.checked && c.p === u.part)).length : uchk.filter(c => c.el.checked).length; cnt.textContent = `받는 사람 ${n}명`; };
+  const seg = h("div", { class: "seg" });
+  const draw = () => { seg.replaceChildren(...[["all", "전체"], ["parts", "파트별"], ["users", "개인별"]].map(([k, t]) => h("button", { class: mode === k ? "on" : "", onclick: () => { mode = k; draw(); } }, t)));
+    tgBox.replaceChildren(mode === "parts" ? boxP : mode === "users" ? boxU : h("div", { class: "muted small" }, "지금 근무 중인 모든 사람에게 보냅니다.")); count(); };
+  boxP.addEventListener("change", count); boxU.addEventListener("change", count); draw();
+  const form = h("div", { class: "form" }, draft ? h("div", { class: "full help" }, "버전 공지 초안입니다. 문구를 고친 뒤 [배포]하면 받는 사람 화면 가운데 팝업으로 뜹니다. 배포 전에는 마스터에게만 보입니다.") : "",
+    ...field("제목", title), ...field("내용", body), ...field("받는 사람", h("div", {}, h("div", { class: "row", style: "margin-bottom:8px" }, seg, cnt), tgBox)));
+  modal(draft ? "버전 공지 배포" : "공지 쓰기", form, [{ text: draft ? "배포" : "보내기", cls: "pri", fn: async () => {
+    const target = mode === "all" ? { all: true } : mode === "parts" ? { parts: pchk.filter(c => c.el.checked).map(c => c.p) } : { users: uchk.filter(c => c.el.checked).map(c => c.u.id) };
+    const r = await api("POST", "/api/notices", { title: title.value, body: body.value, target, draft_id: draft?.id });
+    toast(`${r.sent}명에게 ${draft ? "배포" : "보냈"}${draft ? "했습니다" : "습니다"} (${r.label.split(":")[0]})`); await after();
+  } }], { noBgClose: true });
+}
+async function pageNotices() {
+  const d = await api("GET", "/api/notices");
+  const item = n => h("div", { class: "card notice" + (n.kind === "버전" ? " ver" : "") },
+    h("div", { class: "row" }, h("span", { class: "pop-ic" }, n.kind === "버전" ? "⬆" : "📢"), h("b", { class: "nt-ttl" }, n.title), n.kind === "버전" ? badge("", "업데이트 안내") : "", h("div", { class: "spacer" }),
+      h("span", { class: "muted small" }, `${n.from_name || ""} · ${(n.sent_at || n.created || "").slice(0, 16)}`)),
+    n.body ? h("div", { class: "pre nt-body" }, n.body) : "",
+    d.canSend && n.target_label ? h("div", { class: "muted small", style: "margin-top:6px" }, `받는 사람: ${n.target_label.length > 90 ? n.target_label.slice(0, 90) + "…" : n.target_label} (${n.recv_n}명)`) : "");
+  const draft = n => h("div", { class: "card notice draft" },
+    h("div", { class: "row" }, badge("warn", "초안 · 아직 배포 전"), h("b", { class: "nt-ttl" }, n.title), h("div", { class: "spacer" }),
+      h("button", { class: "btn pri sm", onclick: () => noticeForm(n, pageNotices) }, "고쳐서 배포"),
+      h("button", { class: "btn sm danger", onclick: async () => { if (!(await confirmBox("이 초안을 버립니다. 팀원에게는 이번 버전 안내가 가지 않습니다."))) return; try { await api("DELETE", `/api/notices/${n.id}`); toast("초안을 버렸습니다"); pageNotices(); } catch (e) { toast(e.message, true); } } }, "버리기")),
+    h("div", { class: "pre nt-body" }, n.body));
+  app().replaceChildren(h("div", { class: "row page-hd" }, h("h1", {}, "공지", h("span", { class: "sub" }, d.canSend ? `보낸 공지 전체 ${d.list.length}건` : `받은 공지 ${d.list.length}건`)), h("div", { class: "spacer" }),
+      d.canSend ? h("button", { class: "btn pri", onclick: () => noticeForm(null, pageNotices) }, "+ 공지 쓰기") : ""),
+    h("div", { class: "help" }, d.canSend ? "공지는 마스터 · 팀장이 전체 · 파트별 · 개인별로 보냅니다. 받는 사람 화면 가운데에 팝업으로 뜨고 '확인'을 눌러야 닫힙니다. 보낸 공지는 여기에 계속 남습니다." : "받은 공지가 여기에 계속 남습니다."),
+    ...d.drafts.map(draft),
+    ...(d.list.length ? d.list.map(item) : [h("div", { class: "card muted" }, "공지가 없습니다.")]));
+}
 async function pageRequests() {
   const box = sessionStorage.getItem("rbox") || "in";
   const list = await api("GET", `/api/requests?box=${box}`);
@@ -1024,15 +1109,16 @@ async function pageAssign() {
   const model = searchSel([["", "공통 (모델 없음)"], ...modelsFor(part).map(m => [m.id, `${m.name} (${m.part} · ${m.phase || "-"})`])], "");
   const st = dateInput(M.today), tg = dateInput("");
   const imp = sel(["", "상", "중", "하"], "", { class: "inp" }), cat = searchSel([["", "-"], ...M.categories.map(c => [c.name, c.name])], "");
+  const summary = h("input", { class: "inp", maxLength: 200, placeholder: "간략한 요약 (받는 사람 팝업에 업무명 · 목표일과 함께 보임)" });
   const note = h("textarea", { class: "inp", rows: 3, placeholder: "할 일 · 참고 내용 (받는 사람 업무의 비고에 들어감)" });
   const checks = people.map(u => ({ u, el: h("input", { type: "checkbox" }) }));
-  const form = h("div", { class: "card" }, h("div", { class: "form" }, ...field("업무명", title), ...field("모델", model), ...field("시작일", st), ...field("목표 마감일", tg), ...field("중요도", imp), ...field("업무 분류", cat), ...field("할 일 · 비고", note),
+  const form = h("div", { class: "card" }, h("div", { class: "form" }, ...field("업무명", title), ...field("요약", summary), ...field("모델", model), ...field("시작일", st), ...field("목표 마감일", tg), ...field("중요도", imp), ...field("업무 분류", cat), ...field("할 일 · 비고", note),
     ...field("받는 사람", h("div", { class: "picks" }, checks.map(c => h("label", { class: "pick" }, c.el, " ", c.u.name, part ? "" : h("small", { class: "muted" }, ` ${c.u.part}`)))))),
     h("div", { class: "row", style: "margin-top:12px" }, h("button", { class: "btn pri", onclick: async () => {
       const ids = checks.filter(c => c.el.checked).map(c => c.u.id);
-      try { const r = await api("POST", "/api/assign", { user_ids: ids, title: title.value, model_id: Number(model.value) || null, start: st.value, target: tg.value, importance: imp.value, category: cat.value, note: note.value });
-        toast(`${r.to.join(", ")} 에게 지정했습니다`); pageAssign(); } catch (e) { toast(e.message, true); }
-    } }, "지정하기"), h("span", { class: "muted small" }, "받은 사람의 '내 업무'에 통상 업무로 생깁니다. 받은 사람도 내용을 고칠 수 있습니다.")));
+      try { const r = await api("POST", "/api/assign", { user_ids: ids, title: title.value, model_id: Number(model.value) || null, start: st.value, target: tg.value, importance: imp.value, category: cat.value, note: note.value, summary: summary.value });
+        toast(`${r.to.join(", ")} 에게 지정했습니다 (받는 사람 화면에 팝업으로 뜹니다)`); pageAssign(); } catch (e) { toast(e.message, true); }
+    } }, "지정하기"), h("span", { class: "muted small" }, "받은 사람의 '내 업무'에 통상 업무로 생기고, 화면 가운데 팝업(업무명 · 요약 · 목표일)과 빨간 점으로 알립니다. 받은 사람도 내용을 고칠 수 있습니다.")));
   const groups = {};
   for (const t of list) (groups[t.assign_group || t.id] = groups[t.assign_group || t.id] || []).push(t);
   const fin = t => t.done || t.progress === 100;

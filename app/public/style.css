@@ -563,3 +563,35 @@ html[data-dark="1"] .ssel-in:disabled{background:#151a22;border-color:#262d3a;co
 html[data-dark="1"] .ssel-op.hi,html[data-dark="1"] .ssel-op:hover,html[data-dark="1"] .iimg.drag .iimg-drop,html[data-dark="1"] table.models tr.new-row td{background:#1f2735}
 html[data-dark="1"] .week.month thead th.name{background:#1c2330}
 html[data-dark="1"] .week.month thead tr.sum td.name{background:var(--card)}
+
+/* ── 0.7.0 ── */
+/* 빨간 점: 탭 · 행 */
+nav a{position:relative}
+nav a:has(.ndot){padding-right:16px}
+.ndot{position:absolute;right:1px;bottom:8px;width:8px;height:8px;border-radius:50%;background:#e5484d;box-shadow:0 0 0 2px var(--card)}
+.rdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#e5484d;margin-right:6px;vertical-align:middle;flex:none;animation:rdotIn .25s ease-out}
+@keyframes rdotIn{from{transform:scale(0)}to{transform:scale(1)}}
+/* 가운데 팝업 */
+.modal.pop{width:min(560px,100%)}
+.modal.pop .bd{max-height:calc(100vh - 220px);padding:12px 14px}
+.modal-bg:has(.modal.pop){z-index:60}
+.pop-list{display:flex;flex-direction:column;gap:10px}
+.pop-it{border:1px solid var(--line);border-left:4px solid var(--navy2);border-radius:10px;padding:10px 12px;background:var(--card)}
+.pop-it.notice{border-left-color:#ee8a2c}.pop-it.ver{border-left-color:#6a5bd0}.pop-it.issue{border-left-color:#e5484d}.pop-it.req{border-left-color:#2f9461}
+.pop-hd{display:flex;align-items:center;gap:8px;font-size:13px}
+.pop-ic{font-size:16px;line-height:1}
+.pop-by{color:var(--muted)}
+.pop-by::before{content:"· "}
+.pop-ttl{font-size:16px;font-weight:700;margin:6px 0 2px;overflow-wrap:anywhere}
+.pop-txt{margin:6px 0 2px;overflow-wrap:anywhere}
+.pop-body{margin-top:6px;line-height:1.65;overflow-wrap:anywhere}
+.pop-kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 12px;margin-top:6px;font-size:13.5px}
+.pop-kv>span{color:var(--muted);white-space:nowrap}
+.pop-go{margin-top:6px;text-align:right}
+/* 공지 목록 */
+.card.notice{margin-bottom:10px;border-left:4px solid #ee8a2c}
+.card.notice.ver{border-left-color:#6a5bd0}
+.card.notice.draft{border-left-color:#e0a800;background:var(--lead)}
+.nt-ttl{font-size:15.5px}
+.nt-body{margin-top:8px;line-height:1.7;overflow-wrap:anywhere}
+html[data-dark="1"] .card.notice.draft{background:#262213}

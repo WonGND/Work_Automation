@@ -193,6 +193,6 @@ st, d = adm.req("POST", "/api/master/models/hide", {"id": 999999, "hidden": True
 check("없는 모델", st == 404)
 
 # ── 버전 ──
-check("버전 0.6.0", urllib.request.urlopen(BASE + "/version").read().decode() == "업무관리 0.6.0")
+check("버전 0.6.0 이상", urllib.request.urlopen(BASE + "/version").read().decode() >= "업무관리 0.6.0")
 print(f"0.6.0 시험: 통과 {ok} · 실패 {bad}")
 sys.exit(1 if bad else 0)

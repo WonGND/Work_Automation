@@ -236,7 +236,7 @@ check("기본 행 구분은 못 바꿈", mem.req("PUT", f"/api/tasks/{fx['id']}"
 # 알림
 st, nb = mem.req("GET", "/api/notifs")
 kinds = [n["kind"] for n in nb["list"]]
-check("알림: 업무 지정 · 이슈 담당 · 요청 처리 · 버전", st == 200 and {"업무", "이슈", "요청", "버전"} <= set(kinds) and nb["unread"] >= 4, kinds)
+check("알림: 업무 지정 · 이슈 담당 · 요청 처리 (0.7.0: 버전은 마스터가 공지로 배포)", st == 200 and {"업무", "이슈", "요청"} <= set(kinds) and "버전" not in kinds and nb["unread"] >= 3, kinds)
 st, nb2 = pl2.req("GET", "/api/notifs")
 check("PL 알림: 받은 요청", any(n["kind"] == "요청" and "요청" in n["text"] for n in nb2["list"]), [n["text"] for n in nb2["list"]][:4])
 nid = nb["list"][0]["id"]; mem.req("POST", "/api/notifs/read", {"id": nid})

@@ -13,7 +13,7 @@
 - **이슈 진행 현황 4칸**: 현상 · 원인 분석 · 개선검토 · 검증 및 적용 (PL · 팀장 · 마스터가 씀, 칸별 마지막 수정 표시), 이슈당 첨부 이미지 한 장(붙여넣기 · 끌어다 놓기 · DB 밖 폴더에 저장)
 - **업무로드**: 파트 · 개인별 근무 시간율, 등급 배율을 반영한 업무 로드, 판정(과부하 · 적정 · 여유), 모델별 투입
 - **권한**: 팀원 · PL · 팀장 · 마스터 (우리 파트 · 내가 담당인 이슈만 보기 등)
-- **알림 · 요청**: 🔔 알림, PL · 팀장에게 요청 보내기
+- **알림 · 요청 · 공지**: 🔔 알림 + 화면 가운데 팝업(업무 지정 · 이슈 담당 · 요청 · 공지, 확인해야 닫힘), 새로 지정된 업무 · 이슈에 빨간 점, 마스터 · 팀장의 공지(전체 · 파트 · 개인), 버전 공지 초안 → 마스터 배포, PL · 팀장에게 요청 보내기
 - **엑셀 가져오기**: 기존 엑셀에서 뽑은 seed를 기간을 골라 반영(미리보기 · 되돌릴 수 있는 자동 백업 · 여러 번 해도 같은 결과)
 - **화면**: 화면 A · B · C 세 가지 모양 + 각각 다크 모드, 사람별 저장
 - **입사 · 퇴사**: 입사일 · 퇴사일 (퇴사 다음 날부터 로그인 막힘 · 목록에서 숨김 · 기록은 남음), 미입력 알림(전 근무일 · 주간 요약)
@@ -72,6 +72,7 @@ python3 tools/import_test.py http://127.0.0.1:8000 acc.txt sample/seed.json <데
 python3 tools/v056_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 웹 우선 가져오기 · 입사 · 퇴사 (24건)
 python3 tools/v057_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 미입력 알림 · 화면 갱신 번호 · 가져오기 권한 (14건)
 python3 tools/v060_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 이슈 4칸 · 첨부 이미지 · 월간 표 · 모델 여러 줄/숨김 (74건)
+python3 tools/v070_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 팝업 알림 · 공지 · 버전 공지 초안 · 빨간 점 (68건)
 python3 tools/mail_test.py  http://127.0.0.1:8000 <비밀번호> 홍길동           # 메일 · 비밀번호 찾기 (15건, aiosmtpd 필요)
 ```
 
@@ -81,10 +82,10 @@ python3 tools/mail_test.py  http://127.0.0.1:8000 <비밀번호> 홍길동      
 
 ```bash
 cd app && bun build --compile --target=bun-linux-x64-baseline src/server.ts --outfile ../wl_base && cd ..
-python3 tools/mk_image.py wl_base sample/seed.json workmgmt-0.6.0.tar workmgmt:0.6.0
+python3 tools/mk_image.py wl_base sample/seed.json workmgmt-0.7.0.tar workmgmt:0.7.0
 ```
 
-NAS에서 `docker load -i workmgmt-0.6.0.tar` 후 `deploy/docker-compose.yml`로 실행합니다. `data`(DB · 백업)와 `keys`(암호화 열쇠 · 인증서)는 컨테이너 밖 폴더라 이미지를 바꿔도 그대로 남습니다.
+NAS에서 `docker load -i workmgmt-0.7.0.tar` 후 `deploy/docker-compose.yml`로 실행합니다. `data`(DB · 백업)와 `keys`(암호화 열쇠 · 인증서)는 컨테이너 밖 폴더라 이미지를 바꿔도 그대로 남습니다.
 
 ## 설정 (환경 변수)
 

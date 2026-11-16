@@ -59,6 +59,7 @@ function meta(u: User) {
     myEmail: q1("SELECT email FROM users WHERE id=?", u.id)?.email || "", mailReady: mailReady(), mailDomain: getSetting("mail_domain", ""),
     notifUnread: q1("SELECT COUNT(*) n FROM notifs WHERE user_id=? AND read=0", u.id)?.n || 0,
     reqPending: q1("SELECT COUNT(*) n FROM requests WHERE to_id=? AND status='대기' AND hidden_to=0", u.id)?.n || 0,
+    dots: dotCount(u.id),
     prefs: Object.fromEntries(q("SELECT key,value FROM user_prefs WHERE user_id=?", u.id).map((r: any) => [r.key, r.value])),
     users, models: q("SELECT * FROM models ORDER BY ord,id"), parts: q("SELECT name FROM parts ORDER BY ord").map((p: any) => p.name),
     grades: q("SELECT * FROM grades ORDER BY ord"), categories: q("SELECT * FROM categories ORDER BY ord"),
@@ -73,6 +74,10 @@ function canSeeUser(u: User, uid: number) { return u.id === uid || isAdmin(u); }
 function partOfModel(modelId: number | null) { return modelId ? (q1("SELECT part FROM models WHERE id=?", modelId)?.part || "") : ""; }
 function canManageIssue(u: User, iss: any) { return isAdmin(u) || (isPL(u) && partOfModel(iss.model_id) === u.part); }
 function membersOf(issueId: number) { return q("SELECT m.*, u.name FROM issue_members m JOIN users u ON u.id=m.user_id WHERE issue_id=? ORDER BY CASE m.role WHEN '정' THEN 0 WHEN '부1' THEN 1 ELSE 2 END", issueId); }
+function dotCount(uid: number) {
+  return { me: q1("SELECT COUNT(*) n FROM tasks WHERE user_id=? AND flag=1 AND hidden=0", uid)?.n || 0,
+    myissues: q1("SELECT COUNT(*) n FROM issue_members m JOIN issues i ON i.id=m.issue_id WHERE m.user_id=? AND m.flag=1 AND i.hidden=0", uid)?.n || 0 };
+}
 function stageDone(i: any) { return !!i.done || i.stage === 6; }
 // 0.6.0: 진행 현황 4칸 (기존 칸을 그대로 씀: 현상 = 진행현황 · 원인 분석 = 원인 · 개선검토 = 대응 계획 · 검증 및 적용 = 새 칸)
 export const BOXES: [string, string][] = [["status_text", "현상"], ["cause", "원인 분석"], ["plan", "개선검토"], ["verify", "검증 및 적용"]];
@@ -161,16 +166,16 @@ function weekData(uid: number, from: string, n = 7) {   // n = 7 (주간) 또는
     if (!tk.fixed && !has && (tk.hidden || (fin && tk.done && tk.done < from) || !started)) continue;
     const texts = Object.fromEntries(q("SELECT date,text FROM task_notes WHERE task_id=? AND date BETWEEN ? AND ? AND text<>''", tk.id, from, to).map((r: any) => [r.date, r.text]));
     rows.push({ type: "task", id: tk.id, kind: tk.kind, title: tk.title, model: tk.model_id ? c.models.get(tk.model_id)?.name : "", fixed: tk.fixed, hidden: tk.hidden, done: fin, hours: hrs, texts,
-      assigned: tk.assigned_by ? (q1("SELECT name FROM users WHERE id=?", tk.assigned_by)?.name || "") : "", progress: tk.progress });
+      assigned: tk.assigned_by ? (q1("SELECT name FROM users WHERE id=?", tk.assigned_by)?.name || "") : "", progress: tk.progress, flag: tk.flag ? 1 : 0 });
   }
-  const iss = q(`SELECT i.*, m.role FROM issues i JOIN issue_members m ON m.issue_id=i.id WHERE m.user_id=? ORDER BY i.no`, uid);
+  const iss = q(`SELECT i.*, m.role, m.flag mflag FROM issues i JOIN issue_members m ON m.issue_id=i.id WHERE m.user_id=? ORDER BY i.no`, uid);
   const seen = new Set<number>();
   for (const i of iss) {
     seen.add(i.id);
     const logs = q("SELECT date,hours,text FROM issue_logs WHERE issue_id=? AND user_id=? AND date BETWEEN ? AND ?", i.id, uid, from, to);
     const fin = stageDone(i);
     if (!logs.length && (i.hidden || (fin && i.done && i.done < from))) continue;
-    rows.push({ type: "issue", id: i.id, no: i.no, title: i.title, role: i.role, duty: q1("SELECT duty FROM issue_members WHERE issue_id=? AND user_id=?", i.id, uid)?.duty || "", model: i.model_id ? c.models.get(i.model_id)?.name : "", hidden: i.hidden, done: fin,
+    rows.push({ type: "issue", id: i.id, no: i.no, title: i.title, role: i.role, duty: q1("SELECT duty FROM issue_members WHERE issue_id=? AND user_id=?", i.id, uid)?.duty || "", model: i.model_id ? c.models.get(i.model_id)?.name : "", hidden: i.hidden, done: fin, flag: i.mflag ? 1 : 0,
       hours: Object.fromEntries(logs.map((l: any) => [l.date, l.hours])), texts: Object.fromEntries(logs.filter((l: any) => l.text).map((l: any) => [l.date, l.text])) });
   }
   // 담당에서 빠졌지만 이번 주 기록이 있는 이슈 (기록 보존)
@@ -198,7 +203,8 @@ function nextIssueNo() {
   return no;
 }
 
-function setMembers(issueId: number, members: any[], confirmPl = false) {
+// ACT = 지금 요청을 보낸 사람 (본인이 한 일은 본인에게 팝업 · 빨간 점을 안 띄움)
+function setMembers(issueId: number, members: any[], confirmPl = false, ACT: User | null = null) {
   if (!Array.isArray(members)) err(400, "담당자 형식 오류");
   const roles = new Set<string>(); const usersSeen = new Set<number>();
   for (const m of members) {
@@ -214,16 +220,20 @@ function setMembers(issueId: number, members: any[], confirmPl = false) {
   }
   if (members.some(m => m.user_id) && !roles.has("정")) err(400, "정 담당을 먼저 지정하세요");
   const old = q("SELECT * FROM issue_members WHERE issue_id=?", issueId);
-  const iss = q1("SELECT no, title FROM issues WHERE id=?", issueId);
+  const iss = q1("SELECT no, title, target FROM issues WHERE id=?", issueId);
+  const by = ACT?.name || ""; const pop = (uid: number) => uid !== ACT?.id;
   run("DELETE FROM issue_members WHERE issue_id=?", issueId);
   for (const m of members) if (m.user_id) {
     const prev = old.find((o: any) => o.user_id === Number(m.user_id));
     const duty = "duty" in m ? str(m.duty, 500) : prev?.duty || "";
-    run("INSERT INTO issue_members(issue_id,user_id,role,duty,category) VALUES(?,?,?,?,?)", issueId, Number(m.user_id), m.role, duty, "category" in m ? str(m.category, 200) : prev?.category || "");
-    if (iss && (!prev || prev.role !== m.role)) notify(Number(m.user_id), "이슈", `이슈 ${m.role} 담당이 됐습니다: ${iss.no} ${iss.title}${duty ? ` · 할 일: ${duty.slice(0, 60)}` : ""}`, "#/myissues");
-    else if (iss && prev && prev.duty !== duty) notify(Number(m.user_id), "이슈", `${iss.no} 할 일이 바뀌었습니다: ${duty.slice(0, 80) || "(비움)"}`, "#/myissues");
+    const uid = Number(m.user_id);
+    const chg = !!iss && (!prev || prev.role !== m.role || prev.duty !== duty);
+    run("INSERT INTO issue_members(issue_id,user_id,role,duty,category,flag) VALUES(?,?,?,?,?,?)", issueId, uid, m.role, duty, "category" in m ? str(m.category, 200) : prev?.category || "", chg && pop(uid) ? 1 : prev?.flag || 0);
+    const data = { what: !prev ? "이슈 담당 지정" : "이슈 담당 변경", by, 제목: `${iss?.no} ${iss?.title}`, 역할: m.role, "할 일": duty, 목표일: iss?.target || "" };
+    if (iss && (!prev || prev.role !== m.role)) notify(uid, "이슈", `이슈 ${m.role} 담당이 됐습니다: ${iss.no} ${iss.title}${duty ? ` · 할 일: ${duty.slice(0, 60)}` : ""}`, "#/myissues", { pop: pop(uid), data });
+    else if (iss && prev && prev.duty !== duty) notify(uid, "이슈", `${iss.no} 할 일이 바뀌었습니다: ${duty.slice(0, 80) || "(비움)"}`, "#/myissues", { pop: pop(uid), data });
   }
-  for (const o of old) if (iss && !members.some(m => Number(m.user_id) === o.user_id)) notify(o.user_id, "이슈", `${iss.no} ${iss.title} 담당에서 빠졌습니다`, "#/myissues");
+  for (const o of old) if (iss && !members.some(m => Number(m.user_id) === o.user_id)) notify(o.user_id, "이슈", `${iss.no} ${iss.title} 담당에서 빠졌습니다`, "#/myissues", { pop: pop(o.user_id), data: { what: "이슈 담당 해제", by, 제목: `${iss.no} ${iss.title}` } });
 }
 
 // ── 업무로드 ──
@@ -433,8 +443,15 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       const v = checkTaskInput(body, false);
       if (t.fixed && (v.kind && v.kind !== t.kind)) err(400, "기본 행의 구분은 바꿀 수 없습니다");
       const keys = Object.keys(v); if (!keys.length) return json(taskOut(t));
+      if ("summary" in body && t.assigned_by === me.id) { v.summary = str(body.summary, 200); if (!keys.includes("summary")) keys.push("summary"); }
       run(`UPDATE tasks SET ${keys.map(k => k + "=?").join(",")}, updated=datetime('now','localtime') WHERE id=?`, ...keys.map(k => v[k]), t.id);
       audit(me.id, "업무 수정", `task ${t.id}`, { before: Object.fromEntries(keys.map(k => [k, t[k]])), after: v });
+      const chg = ["title", "model_id", "start", "target", "summary", "note", "importance"].filter(k => k in v && (v[k] ?? "") !== (t[k] ?? ""));
+      if (t.user_id !== me.id && chg.length) {   // 0.7.0: 다른 사람(지정한 PL · 팀장 · 마스터)이 내 업무를 바꿈
+        const n = q1("SELECT * FROM tasks WHERE id=?", t.id);
+        run("UPDATE tasks SET flag=1 WHERE id=?", t.id);
+        notify(t.user_id, "업무", `${me.name} 이(가) 업무를 바꿨습니다: ${n.title}`, "#/me", { pop: true, data: { what: "업무 변경", by: me.name, 제목: n.title, 요약: n.summary || "", 목표일: n.target || "", 모델: n.model_id ? q1("SELECT name FROM models WHERE id=?", n.model_id)?.name || "" : "" } });
+      }
       return json(taskOut(q1("SELECT * FROM tasks WHERE id=?", t.id)));
     }
   }
@@ -453,16 +470,18 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     const ids: number[] = Array.from(new Set((body.user_ids || []).map(Number)));
     if (!ids.length) err(400, "받을 사람을 고르세요");
     const v = checkTaskInput({ ...body, kind: "통상" }, true);
+    const summary = str(body.summary, 200);
     const grp = `${Date.now().toString(36)}-${me.id}`;
     const made: string[] = [];
     db.transaction(() => {
       for (const id of ids) {
         const u = q1("SELECT * FROM users WHERE id=?", id);
         if (!canAssignTo(me, u)) err(403, `${u?.name || id}: ${isPL(me) ? me.part + " 사람에게만" : ""} 지정할 수 있습니다`);
-        run(`INSERT INTO tasks(user_id,kind,model_id,title,progress,start,target,done,importance,category,note,ord,assigned_by,assign_group) VALUES(?,?,?,?,0,?,?,NULL,?,?,?,(SELECT IFNULL(MAX(ord),0)+1 FROM tasks WHERE user_id=?),?,?)`,
-          id, "통상", v.model_id ?? null, v.title, v.start ?? null, v.target ?? null, v.importance ?? "", v.category ?? "", v.note ?? "", id, me.id, grp);
+        run(`INSERT INTO tasks(user_id,kind,model_id,title,progress,start,target,done,importance,category,note,ord,assigned_by,assign_group,summary,flag) VALUES(?,?,?,?,0,?,?,NULL,?,?,?,(SELECT IFNULL(MAX(ord),0)+1 FROM tasks WHERE user_id=?),?,?,?,?)`,
+          id, "통상", v.model_id ?? null, v.title, v.start ?? null, v.target ?? null, v.importance ?? "", v.category ?? "", v.note ?? "", id, me.id, grp, summary, id !== me.id ? 1 : 0);
         made.push(u.name);
-        if (id !== me.id) notify(id, "업무", `${me.name} 이(가) 업무를 지정했습니다: ${v.title}${v.target ? ` (목표 ${v.target})` : ""}`, "#/me");
+        if (id !== me.id) notify(id, "업무", `${me.name} 이(가) 업무를 지정했습니다: ${v.title}${v.target ? ` (목표 ${v.target})` : ""}`, "#/me",
+          { pop: true, data: { what: "업무 지정", by: me.name, 제목: v.title, 요약: summary, 목표일: v.target || "", 모델: v.model_id ? q1("SELECT name FROM models WHERE id=?", v.model_id)?.name || "" : "" } });
       }
     })();
     audit(me.id, "업무 지정", v.title, { to: made, ...v });
@@ -486,7 +505,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     if (!text) err(400, "요청 내용을 적어 주세요");
     const r = run("INSERT INTO requests(from_id,to_id,text) VALUES(?,?,?)", me.id, to, text);
     audit(me.id, "요청 보냄", String(to), { text });
-    notify(to, "요청", `${me.name} 의 요청: ${text.slice(0, 80)}`, "#/requests");
+    notify(to, "요청", `${me.name} 의 요청: ${text.slice(0, 80)}`, "#/requests", { pop: true, data: { what: "요청 도착", by: me.name, 내용: text.slice(0, 400) } });
     return json(reqOut(q1("SELECT * FROM requests WHERE id=?", Number(r.lastInsertRowid))));
   }
   const mrq = p.match(/^\/api\/requests\/(\d+)$/);
@@ -498,7 +517,8 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     const st = ["대기", "확인", "완료"].includes(body.status) ? body.status : r.status;
     run("UPDATE requests SET status=?, reply=?, updated=datetime('now','localtime') WHERE id=?", st, "reply" in body ? str(body.reply, 2000) : r.reply, r.id);
     audit(me.id, "요청 처리", String(r.id), { status: st, reply: body.reply });
-    if (st !== r.status || (body.reply && body.reply !== r.reply)) { notify(r.from_id, "요청", `${me.name} 이(가) 요청을 '${st}'(으)로 처리했습니다${body.reply ? `: ${String(body.reply).slice(0, 60)}` : ""}`, "#/requests"); }
+    if (st !== r.status || (body.reply && body.reply !== r.reply)) { notify(r.from_id, "요청", `${me.name} 이(가) 요청을 '${st}'(으)로 처리했습니다${body.reply ? `: ${String(body.reply).slice(0, 60)}` : ""}`, "#/requests",
+      { pop: true, data: { what: `요청 ${st}`, by: me.name, "보낸 요청": String(r.text).slice(0, 200), 답변: str(body.reply ?? r.reply, 400) } }); }
     return json(reqOut(q1("SELECT * FROM requests WHERE id=?", r.id)));
   }
   if (p === "/api/me/email" && m === "PUT") {
@@ -512,7 +532,69 @@ export async function handle(req: Request, url: URL): Promise<Response> {
   if (p === "/api/notifs" && m === "GET") {
     // rev: 모두가 같이 보는 정보(계정 · 모델 · 기준 · 이슈 · 지정)가 마지막으로 바뀐 번호 → 화면이 이 값이 바뀌면 다시 읽음
     const rev = q1(`SELECT IFNULL(MAX(id),0) n FROM audit WHERE action IN ('계정 수정','계정 추가','공휴일 추가','공휴일 삭제','기준값 수정','기준정보 배율','등급 추가','업무 분류 추가','업무 지정','엑셀 가져오기','seed 추가 반영','이슈 등록','이슈 수정','이슈 삭제(숨김)','이슈 되살리기','판정 문구 수정','휴직 수정','휴직 추가','모델 추가','모델 수정','모델 삭제(숨김)','모델 되살리기','이슈 이미지')`)?.n || 0;
-    return json({ rev, unread: q1("SELECT COUNT(*) n FROM notifs WHERE user_id=? AND read=0", me.id)?.n || 0, list: q("SELECT * FROM notifs WHERE user_id=? ORDER BY id DESC LIMIT 60", me.id) });
+    return json({ rev, unread: q1("SELECT COUNT(*) n FROM notifs WHERE user_id=? AND read=0", me.id)?.n || 0, list: q("SELECT * FROM notifs WHERE user_id=? ORDER BY id DESC LIMIT 60", me.id),
+      pops: q("SELECT id,kind,text,link,created,data FROM notifs WHERE user_id=? AND pop=1 AND ack=0 ORDER BY id LIMIT 30", me.id).map((n: any) => ({ ...n, data: (() => { try { return n.data ? JSON.parse(n.data) : {}; } catch { return {}; } })() })),
+      dots: dotCount(me.id) });
+  }
+  // 0.7.0: 팝업 '확인' (확인한 알림은 읽음 처리)
+  if (p === "/api/notifs/ack" && m === "POST") {
+    const ids: number[] = (Array.isArray(body.ids) ? body.ids : []).map(Number).filter(Boolean).slice(0, 100);
+    for (const id of ids) run("UPDATE notifs SET ack=1, read=1 WHERE user_id=? AND id=?", me.id, id);
+    return json({ ok: true, unread: q1("SELECT COUNT(*) n FROM notifs WHERE user_id=? AND read=0", me.id)?.n || 0 });
+  }
+  // 0.7.0: 빨간 점 — 탭을 열면 탭의 점이 꺼지고(1 → 2), 행을 누르면 행의 점이 꺼짐(→ 0)
+  if (p === "/api/dots/seen" && m === "POST") {
+    if (body.tab === "me") run("UPDATE tasks SET flag=2 WHERE user_id=? AND flag=1", me.id);
+    else if (body.tab === "myissues") run("UPDATE issue_members SET flag=2 WHERE user_id=? AND flag=1", me.id);
+    else err(400, "tab 오류");
+    return json({ ok: true, dots: dotCount(me.id) });
+  }
+  if (p === "/api/dots/clear" && m === "POST") {
+    if (body.type === "task") run("UPDATE tasks SET flag=0 WHERE user_id=? AND id=?", me.id, Number(body.id));
+    else if (body.type === "issue") run("UPDATE issue_members SET flag=0 WHERE user_id=? AND issue_id=?", me.id, Number(body.id));
+    else err(400, "type 오류");
+    return json({ ok: true, dots: dotCount(me.id) });
+  }
+  // ── 0.7.0: 공지 ── 보내기는 마스터 · 팀장, 받는 사람 = 전체 · 파트 · 개인. 버전 공지 초안은 마스터가 고쳐서 배포
+  if (p === "/api/notices" && m === "GET") {
+    const adm = isAdmin(me);
+    const list = q(`SELECT n.*, (SELECT name FROM users WHERE id=n.from_id) from_name, (SELECT COUNT(*) FROM notice_recv r WHERE r.notice_id=n.id) recv_n FROM notices n
+      WHERE n.status='sent' AND (${adm ? "1" : "0"} OR EXISTS (SELECT 1 FROM notice_recv r WHERE r.notice_id=n.id AND r.user_id=?)) ORDER BY n.sent_at DESC, n.id DESC LIMIT 200`, me.id);
+    const drafts = me.role === "master" ? q("SELECT * FROM notices WHERE status='draft' ORDER BY id DESC") : [];
+    return json({ list: list.map((n: any) => ({ ...n, target: undefined, target_label: adm ? n.target_label : "", recv_n: adm ? n.recv_n : undefined })), drafts, canSend: adm });
+  }
+  if (p === "/api/notices" && m === "POST") {
+    if (!isAdmin(me)) err(403, "공지는 마스터 · 팀장만 보낼 수 있습니다");
+    const draft = body.draft_id ? q1("SELECT * FROM notices WHERE id=? AND status='draft'", Number(body.draft_id)) : null;
+    if (body.draft_id && !draft) err(404, "초안이 없습니다 (이미 배포했거나 버렸습니다)");
+    if (draft && me.role !== "master") err(403, "버전 공지는 마스터가 배포합니다");
+    const title = str(body.title, 100), text = str(body.body, 2000);
+    if (!title) err(400, "제목을 적어 주세요");
+    const tg = body.target || {}; let ids: number[] = []; let label = "";
+    const act = q("SELECT id,name,part,left_on FROM users WHERE active=1").filter((u: any) => !gone(u));
+    if (tg.all) { ids = act.map((u: any) => u.id); label = "전체"; }
+    else if (Array.isArray(tg.parts) && tg.parts.length) { const ps = tg.parts.map((x: any) => str(x, 30)); ids = act.filter((u: any) => ps.includes(u.part)).map((u: any) => u.id); label = "파트: " + ps.join(" · "); }
+    else if (Array.isArray(tg.users) && tg.users.length) { const us = tg.users.map(Number); const hit = act.filter((u: any) => us.includes(u.id)); ids = hit.map((u: any) => u.id); label = "개인: " + hit.map((u: any) => u.name).join(" · "); }
+    if (!ids.length) err(400, "받는 사람을 고르세요 (전체 · 파트 · 개인)");
+    let nid = 0;
+    db.transaction(() => {
+      if (draft) { run("UPDATE notices SET from_id=?, title=?, body=?, target=?, target_label=?, status='sent', sent_at=datetime('now','localtime') WHERE id=?", me.id, title, text, JSON.stringify(tg), label, draft.id); nid = draft.id; }
+      else nid = Number(run("INSERT INTO notices(kind,from_id,title,body,target,target_label,status,sent_at) VALUES('공지',?,?,?,?,?,'sent',datetime('now','localtime'))", me.id, title, text, JSON.stringify(tg), label).lastInsertRowid);
+      for (const id of ids) run("INSERT OR IGNORE INTO notice_recv(notice_id,user_id) VALUES(?,?)", nid, id);
+    })();
+    const kind = draft ? draft.kind : "공지";
+    notify(ids.filter(id => id !== me.id), kind, `${kind === "버전" ? "업데이트 안내" : "공지"}: ${title}`, "#/notices", { pop: true, data: { what: kind === "버전" ? "업데이트 안내" : "공지", by: me.name, 제목: title, 본문: text, notice_id: nid } });
+    audit(me.id, draft ? "버전 공지 배포" : "공지 보냄", title, { 받는사람: label, 인원: ids.length });
+    return json({ ok: true, id: nid, sent: ids.length, label });
+  }
+  const mnt = p.match(/^\/api\/notices\/(\d+)$/);
+  if (mnt && m === "DELETE") {   // 초안 버리기 (보낸 공지는 지우지 않음)
+    if (me.role !== "master") err(403, "마스터만 할 수 있습니다");
+    const d = q1("SELECT * FROM notices WHERE id=?", Number(mnt[1])); if (!d) err(404, "없는 공지입니다");
+    if (d.status !== "draft") err(400, "보낸 공지는 지울 수 없습니다");
+    run("DELETE FROM notices WHERE id=?", d.id); audit(me.id, "버전 공지 초안 버림", d.title, "");
+    run("UPDATE notifs SET ack=1, read=1 WHERE pop=1 AND ack=0 AND data LIKE ?", `%"draft_id":${d.id}%`);
+    return json({ ok: true });
   }
   if (p === "/api/notifs/read" && m === "POST") {
     if (body.all) run("UPDATE notifs SET read=1 WHERE user_id=?", me.id); else run("UPDATE notifs SET read=1 WHERE user_id=? AND id=?", me.id, Number(body.id));
@@ -579,7 +661,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     else if (scope === "part") {
       const pt = isAdmin(me) ? (url.searchParams.get("part") || "") : plPart(me); if (!pt) err(403, "PL만 볼 수 있습니다");
       list = q("SELECT i.* FROM issues i LEFT JOIN models md ON md.id=i.model_id WHERE i.hidden=0 AND md.part=? ORDER BY i.no", pt);
-    } else list = q("SELECT i.* FROM issues i JOIN issue_members m ON m.issue_id=i.id WHERE m.user_id=? AND i.hidden=0 ORDER BY i.no", me.id);
+    } else list = q("SELECT i.*, m.flag mflag FROM issues i JOIN issue_members m ON m.issue_id=i.id WHERE m.user_id=? AND i.hidden=0 ORDER BY i.no", me.id);
     const keep = num("done_keep_days", 30); const t = today();
     const showDone = url.searchParams.get("done") !== "0";
     return json(list.map((i: any) => issueRow(i, c)).filter(i => showDone || !stageDone(i) || (i.done && i.done >= addDays(t, -keep))));
@@ -599,7 +681,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       const r = run(`INSERT INTO issues(no,model_id,title,source,occurred,target,stage,status_text,cause,plan,verify,box_meta,note,importance,created_by) VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?,?)`,
         no, model_id, title, str(body.source, 20), dOrNull(body.occurred) || today(), dOrNull(body.target), str(body.status_text, 4000), str(body.cause, 4000), str(body.plan, 4000), str(body.verify, 4000), JSON.stringify(meta), str(body.note), str(body.importance, 5), me.id);
       id = Number(r.lastInsertRowid);
-      setMembers(id, body.members || [], !!body.confirm_pl);
+      setMembers(id, body.members || [], !!body.confirm_pl, me);
     })();
     audit(me.id, "이슈 등록", no, body);
     return json(issueRow(q1("SELECT * FROM issues WHERE id=?", id)));
@@ -678,7 +760,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       db.transaction(() => {
         const keys = Object.keys(set);
         if (keys.length) run(`UPDATE issues SET ${keys.map(k => k + "=?").join(",")}, updated=datetime('now','localtime') WHERE id=?`, ...keys.map(k => set[k]), iss.id);
-        if ("members" in body) { if (!manage) err(403, "담당자는 PL · 팀장만 지정합니다"); setMembers(iss.id, body.members, !!body.confirm_pl); }
+        if ("members" in body) { if (!manage) err(403, "담당자는 PL · 팀장만 지정합니다"); setMembers(iss.id, body.members, !!body.confirm_pl, me); }
       })();
       audit(me.id, "이슈 수정", iss.no, { before: Object.fromEntries(Object.keys(set).map(k => [k, iss[k]])), after: set, members: body.members ? body.members : undefined });
       return json(issueRow(q1("SELECT * FROM issues WHERE id=?", iss.id)));

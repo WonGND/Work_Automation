@@ -123,13 +123,24 @@ function migrate() {
   addCol("models", "hidden", "INTEGER DEFAULT 0");
   db.exec(`CREATE TABLE IF NOT EXISTS notifs (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT, text TEXT, link TEXT DEFAULT '', created TEXT DEFAULT (datetime('now','localtime')), read INTEGER DEFAULT 0);
     CREATE INDEX IF NOT EXISTS ix_notif_user ON notifs(user_id, read);
-    CREATE TABLE IF NOT EXISTS pw_resets (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, code_hash TEXT, expires TEXT, tries INTEGER DEFAULT 0, used INTEGER DEFAULT 0, created TEXT DEFAULT (datetime('now','localtime')));`);   // 0.2.1: 기본 행 구분 (이름을 고쳐도 같은 행)
+    CREATE TABLE IF NOT EXISTS pw_resets (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, code_hash TEXT, expires TEXT, tries INTEGER DEFAULT 0, used INTEGER DEFAULT 0, created TEXT DEFAULT (datetime('now','localtime')));`);   // 0.7.0: 가운데 팝업(pop · ack) · 공지 · 지정 업무 요약 · 새로 지정/바뀐 표시(빨간 점: 1 = 새 것, 2 = 탭은 봄, 0 = 봄)
+  addCol("notifs", "pop", "INTEGER DEFAULT 0");
+  addCol("notifs", "ack", "INTEGER DEFAULT 0");
+  addCol("notifs", "data", "TEXT DEFAULT ''");
+  addCol("tasks", "summary", "TEXT DEFAULT ''");
+  addCol("tasks", "flag", "INTEGER DEFAULT 0");
+  addCol("issue_members", "flag", "INTEGER DEFAULT 0");
+  db.exec(`CREATE TABLE IF NOT EXISTS notices (id INTEGER PRIMARY KEY, kind TEXT DEFAULT '공지', from_id INTEGER, title TEXT, body TEXT DEFAULT '', target TEXT DEFAULT '{}', target_label TEXT DEFAULT '',
+      status TEXT DEFAULT 'sent', version TEXT DEFAULT '', created TEXT DEFAULT (datetime('now','localtime')), sent_at TEXT);
+    CREATE TABLE IF NOT EXISTS notice_recv (notice_id INTEGER NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY (notice_id, user_id));`);
+  // 0.2.1: 기본 행 구분 (이름을 고쳐도 같은 행)
   db.exec(`CREATE TABLE IF NOT EXISTS requests (id INTEGER PRIMARY KEY, from_id INTEGER NOT NULL, to_id INTEGER NOT NULL, text TEXT NOT NULL,
     status TEXT DEFAULT '대기', reply TEXT DEFAULT '', created TEXT DEFAULT (datetime('now','localtime')), updated TEXT DEFAULT (datetime('now','localtime')), hidden_from INTEGER DEFAULT 0, hidden_to INTEGER DEFAULT 0);
     CREATE INDEX IF NOT EXISTS ix_req_to ON requests(to_id, status);`);
 }
 
 // 알림 (우상단 🔔)
-export function notify(userIds: number | number[], kind: string, text: string, link = "") {
-  for (const u of ([] as number[]).concat(userIds)) if (u) db.query("INSERT INTO notifs(user_id,kind,text,link) VALUES(?,?,?,?)").run(u, kind, text, link);
+// opt.pop = 화면 가운데 팝업으로도 띄움 (받은 사람이 '확인'을 누를 때까지) · opt.data = 팝업에 보일 내용
+export function notify(userIds: number | number[], kind: string, text: string, link = "", opt: { pop?: boolean; data?: any } = {}) {
+  for (const u of ([] as number[]).concat(userIds)) if (u) db.query("INSERT INTO notifs(user_id,kind,text,link,pop,data) VALUES(?,?,?,?,?,?)").run(u, kind, text, link, opt.pop ? 1 : 0, opt.data ? JSON.stringify(opt.data) : "");
 }

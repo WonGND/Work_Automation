@@ -5,7 +5,7 @@
 //   HTTPS 프록시 뒤 (시놀로지 역방향 프록시 등): --behind-proxy [--https-only]
 //   비밀값 열쇠: 환경변수 WL_SECRET_KEY 또는 --key-file <파일> (기본: 프로그램 옆 '비밀키\secret.key')
 //   같은 설정을 환경변수로도: WL_PORT WL_DATA WL_TLS_CERT WL_TLS_KEY WL_HTTP_PORT WL_BEHIND_PROXY=1 WL_HTTPS_ONLY=1 WL_KEY_FILE
-import { openDb, q, q1, backup, getSetting, setSetting, notify, db } from "./db";
+import { openDb, q, q1, run, backup, getSetting, setSetting, notify, db } from "./db";
 import { importSeed, mergeSeed, ensureFixedRows } from "./seed";
 import { handle, HttpError, NET, setupNeeded, acctFiles } from "./api";
 import { initSecret, enc, isEnc, randCode } from "./secret";
@@ -20,7 +20,7 @@ import CSS from "../public/style.css" with { type: "text" };
 import { GUIDE } from "./guide_img";
 import { createHash } from "node:crypto";
 
-export const VERSION = "업무관리 0.6.0";
+export const VERSION = "업무관리 0.7.0";
 const args = process.argv.slice(2);
 const ENVK: Record<string, string> = { "--port": "WL_PORT", "--data": "WL_DATA", "--cert": "WL_TLS_CERT", "--key": "WL_TLS_KEY", "--http-port": "WL_HTTP_PORT", "--key-file": "WL_KEY_FILE", "--seed": "WL_SEED" };
 const arg = (k: string, d: string) => { const i = args.indexOf(k); if (i >= 0 && args[i + 1]) return args[i + 1]; const e = ENVK[k] && process.env[ENVK[k]]; return e || d; };
@@ -120,6 +120,7 @@ remind(); setInterval(remind, 10 * 60e3);
 const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'";
 // 버전이 바뀌면 모든 사람에게 알림 (우상단 🔔)
 const NOTES: Record<string, string> = {
+  "업무관리 0.7.0": "알림을 화면 가운데 팝업으로 (공지 · 업무 지정/변경 · 이슈 담당 지정/변경 · 요청 도착/답변 · 업데이트 안내, '확인'을 눌러야 닫힘 · 🔔 숫자도 같이 · 미입력 알림은 🔔만) · 공지 메뉴 (마스터 · 팀장이 전체 · 파트 · 개인에게 보냄 · 지난 공지 보기) · 버전이 바뀌면 마스터에게 공지 초안 → 고쳐서 배포 (자동 버전 알림 없앰) · 업무 지정에 '요약' 칸 · 새로 지정되거나 바뀐 업무 · 이슈에 빨간 점 (탭의 점은 탭을 열면, 행의 점은 행을 누르면 꺼짐)",
   "업무관리 0.6.0": "이슈 진행 현황을 4칸으로 (현상 · 원인 분석 · 개선검토 · 검증 및 적용) — 이슈를 누르면 왼쪽에 이슈 정보, 오른쪽에 4칸 · PL · 팀장 · 마스터가 씀 · 예전 진행현황은 '현상', 원인은 '원인 분석', 대응 계획은 '개선검토' 칸에 그대로 · 이슈 첨부 이미지 한 장 (붙여넣기 Ctrl+V · 끌어다 놓기 · 파일 고르기, 이슈 정리의 🖼 버튼으로 보기) · 이슈 요약에 발생일 · 현재 진행 칸 · 담당은 정 · 부1 · 부2 순서로 이름만 · 모든 표 머리글 가운데 정렬 · 업무로드 · 요약 기간에 이전 / 다음 버튼 (주 · 월 · 연) · 내 업무 시간 입력 표 월간 보기 · 기준정보 모델 여러 줄 한 번에 추가 · 모델 삭제(숨김) · 되살리기 · 업무 추가 창에서 모델 · 업무 분류 검색",
   "업무관리 0.5.8": "엑셀 가져오기: 이슈 정리의 지연 사유도 가져옴 (엑셀 이슈 정리의 담당 · 맡은 일 · 진행현황 · 단계를 다시 맞춤)",
   "업무관리 0.5.7": "미입력 알림 (전 근무일에 시간이 없으면 아침에 🔔 · 팀장 · PL에게는 주 첫날 지난주 요약) · 다른 사람이 바꾼 계정 · 모델 · 이슈 담당이 열려 있는 화면에도 몇 분 안에 반영 · 엑셀 가져오기는 마스터만",
@@ -134,9 +135,29 @@ const NOTES: Record<string, string> = {
   "웹 시범판 0.4.0": "보안 보강 — 계정표 파일 없앰(처음 비밀번호는 관리 > 계정 '초기화'로 받음) · PL은 우리 파트 · 내 담당 이슈만 열람 · 메일 비밀번호 암호화 · HTTPS 지원",
   "웹 시범판 0.3.0": "우상단 🔔 알림 · 비밀번호 찾기(회사 메일) · 화면 A/B/C 크기 통일 · 업무로드 '모델별 시간 표' 칸 정리",
 };
-if (getSetting("last_version", "") !== VERSION) {
-  notify(q("SELECT id FROM users WHERE active=1").map((x: any) => x.id), "버전", `${VERSION} 로 업데이트됐습니다${NOTES[VERSION] ? ": " + NOTES[VERSION] : ""}`, "");
-  setSetting("last_version", VERSION);
+// 0.7.0: 버전이 바뀌면 전원에게 바로 알리지 않고, 마스터에게 '공지 초안'을 띄움 → 마스터가 고쳐서 [배포]하면 전원에게 팝업
+// 공지용 글: 핵심만 짧게 (한 줄에 하나). 여러 버전을 건너뛰어 올리면 그 사이 것을 모두 넣음
+const NOTICE: [string, string[]][] = [
+  ["업무관리 0.6.0", ["이슈를 누르면 진행 현황 4칸 (현상 · 원인 분석 · 개선검토 · 검증 및 적용) — PL · 팀장이 작성", "이슈 첨부 이미지 한 장 (Ctrl+V · 끌어다 놓기), 이슈 정리 🖼 버튼으로 보기", "이슈 요약에 발생일 · 현재 진행 추가", "내 업무 월간 보기, 업무로드 이전 / 다음 버튼", "업무 추가 창에서 모델 · 업무 분류 검색"]],
+  ["업무관리 0.7.0", ["업무 · 이슈가 지정되거나 바뀌면 화면 가운데 팝업 ('확인'을 눌러야 닫힘)", "새로 지정된 업무 · 이슈에 빨간 점 표시", "공지 메뉴 추가 (지난 공지 보기)"]],
+];
+{
+  const last = getSetting("last_version", "");
+  if (last !== VERSION) {
+    const at = NOTICE.findIndex(([v]) => v === last);
+    const news = NOTICE.slice(at + 1).slice(-3);   // 지난 버전 다음부터 (0.5.8에서 바로 올리면 0.6.0 + 0.7.0) · 많아도 최근 3개 버전
+    const lines = news.flatMap(([, ls]) => ls);
+    if (lines.length && q1("SELECT 1 FROM users WHERE active=1")) {
+      const ver = VERSION.replace("업무관리 ", "");
+      for (const d of q("SELECT id FROM notices WHERE status='draft' AND kind='버전'")) run("DELETE FROM notices WHERE id=?", d.id);   // 배포하지 않은 예전 초안은 새 초안으로 바꿈
+      run("UPDATE notifs SET ack=1 WHERE pop=1 AND ack=0 AND kind='버전' AND data LIKE '%draft_id%'");
+      const r = run("INSERT INTO notices(kind,title,body,status,version) VALUES('버전',?,?,'draft',?)", `업무관리 ${ver} 업데이트 안내`, lines.map(l => "· " + l).join("\n"), VERSION);
+      const id = Number(r.lastInsertRowid);
+      notify(q("SELECT id FROM users WHERE active=1 AND role='master'").map((x: any) => x.id), "버전", `${VERSION} 로 업데이트됐습니다 · 공지 초안을 확인하고 배포해 주세요`, "#/notices",
+        { pop: true, data: { what: "버전 공지 초안", 제목: `업무관리 ${ver} 업데이트 안내`, 본문: lines.map(l => "· " + l).join("\n"), 안내: "공지 메뉴에서 문구를 고쳐 [배포]하면 팀원에게 팝업으로 갑니다. 배포 전에는 마스터에게만 보입니다.", draft_id: id } });
+    }
+    setSetting("last_version", VERSION);
+  }
 }
 // 모든 응답에 붙이는 보안 헤더
 function secure(res: Response, req: Request) {
