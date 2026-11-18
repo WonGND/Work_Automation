@@ -375,6 +375,16 @@ function buildNav() {
   $("#nav").replaceChildren(...items.map(([href, t]) => h("a", { href }, t, href === "#/requests" && M.reqPending ? h("span", { class: "nbadge" }, M.reqPending) : "", dot[href] ? h("i", { class: "ndot", title: "새로 지정됐거나 바뀐 것이 있습니다" }) : "")));
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("on", (location.hash || "").startsWith(a.getAttribute("href")));
 }
+// 0.7.1: 비밀번호 칸에서 Caps Lock 이 켜져 있으면 칸 아래에 안내
+function capsCheck(e) {
+  const el = e.target; if (!(el instanceof HTMLInputElement) || el.type !== "password") return;
+  let tip = el.nextElementSibling?.classList?.contains("caps-tip") ? el.nextElementSibling : null;
+  const on = e.type !== "blur" && typeof e.getModifierState === "function" && e.getModifierState("CapsLock");
+  if (on && !tip) { tip = h("div", { class: "caps-tip", role: "status" }, "⇪ Caps Lock 이 켜져 있습니다"); el.after(tip); }
+  if (tip) tip.hidden = !on;
+}
+for (const ev of ["keydown", "keyup", "mousedown", "focusin"]) document.addEventListener(ev, capsCheck, true);
+document.addEventListener("blur", capsCheck, true);
 // 0.7.0: 빨간 점 — 탭을 열면 탭의 점이 꺼지고, 행을 누르면 행의 점이 꺼짐
 function setDots(d) { if (!M || !d) return; if (M.dots?.me !== d.me || M.dots?.myissues !== d.myissues) { M.dots = d; buildNav(); } }
 async function dotSeen(tab) { if (M.dots?.[tab]) { try { setDots((await api("POST", "/api/dots/seen", { tab })).dots); } catch {} } }
@@ -543,6 +553,7 @@ async function renderWeek(box, uid, readonly, refreshAll) {
     h("button", { class: "btn sm", onclick: () => { weekFrom = mon ? M.today : monday(M.today); again(); } }, mon ? "이번 달" : "이번 주"),
     h("div", { class: "spacer" }),
     readonly ? "" : h("button", { class: "btn", onclick: () => requestModal() }, "✉ 요청하기"),
+    !readonly && M.user.role === "pl" && uid === M.user.id ? h("button", { class: "btn", title: `${M.user.part} 이슈 등록 (PL)`, onclick: () => issueForm(null, refreshAll) }, "+ 이슈 등록") : "",
     readonly ? "" : h("button", { class: "btn pri", onclick: () => taskModal(null, false, refreshAll) }, "+ 업무 추가"));
   const thead = h("thead", {}, h("tr", {}, h("th", { class: "name" }, "업무 · 이슈"), w.days.map(d => h("th", { class: "c " + (d.workday ? "" : "we ") + (d.holiday ? "hol " : "") + (d.today ? "today" : ""), title: d.holiday || d.date }, mon ? [String(Number(d.date.slice(8))), h("div", { class: "small" }, WD[new Date(d.date + "T00:00:00").getDay()])] : dd(d.date), d.holiday && !mon ? h("div", { class: "small" }, d.holiday) : "")), h("th", { class: "c" }, "합계")));
   const tbody = h("tbody");
@@ -628,7 +639,7 @@ async function renderWeek(box, uid, readonly, refreshAll) {
     const name = h("td", { class: "name" },
       drag && !readonly ? dragHandle() : "",
       h("span", { class: "t lnk", role: "button", title: (r.duty ? `할 일 (PL): ${r.duty}\n` : "") + "눌러서 내용 보기", onclick: open }, dotEl, r.type === "issue" ? [h("b", {}, r.no + " "), r.title] : r.title),
-      h("span", { class: "m" }, r.type === "issue" ? [badge(r.released ? "warn" : "role", r.role), " ", r.model || "공통"] : [r.kind, r.model ? " · " + r.model : r.fixed ? " · 기본 행" : " · 공통"],
+      h("span", { class: "m" }, r.type === "issue" ? [badge(r.released ? "warn" : r.plManage ? "pl" : "role", r.role), " ", r.model || "공통"] : [r.kind, r.model ? " · " + r.model : r.fixed ? " · 기본 행" : " · 공통"],
         r.assigned ? [" ", badge("pl", "PL 지정")] : "", r.hidden ? [" ", badge("warn", "삭제됨")] : "", r.done ? [" ", badge("done", "완료")] : ""));
     target.append(h("tr", { "data-id": r.id }, name, tds, tot));
   };
@@ -648,7 +659,8 @@ async function renderWeek(box, uid, readonly, refreshAll) {
   grp("이슈", "iss", iss.filter(r => !r.done));
   grp("업무", "task", rest.filter(r => !r.done), { always: true, drag: true });
   grp("기본 행 (회의 · 교육 · 휴가 · 조퇴)", "fix", fixed, { always: true });
-  grp(`완료 · 삭제한 것 (이번 ${mon ? "달" : "주"} 기록 있음)`, "done", [...iss.filter(r => r.done), ...rest.filter(r => r.done)], { closed: true });
+  const byDone = (a, b) => String(b.doneAt || "").localeCompare(String(a.doneAt || "")) || (b.id - a.id);   // 0.7.1: 최신 완료가 위로
+  grp(`완료 · 삭제한 것 (이번 ${mon ? "달" : "주"} 기록 있음)`, "done", [...iss.filter(r => r.done), ...rest.filter(r => r.done)].sort(byDone), { closed: true });
   recalc();
   const table = h("table", { class: mon ? "mon" : "" }, thead, ...tables);
   resizable(table, mon ? "month" : "week");
@@ -671,7 +683,11 @@ async function renderTasks(box, uid, readonly, refreshAll) {
   let filter = box.dataset.f || "open";
   const list = await api("GET", `/api/tasks?user=${uid}${filter === "hidden" ? "&hidden=1" : ""}`);
   const fin = t => t.done || t.progress === 100;
-  const shown = list.filter(t => filter === "all" ? true : filter === "done" ? fin(t) : filter === "hidden" ? t.hidden : !fin(t) && !t.hidden);
+  const doneKey = t => t.done || "";   // 완료일이 없는 것(진행률 100%만)은 맨 아래
+  const byDone = (a, b) => doneKey(b).localeCompare(doneKey(a)) || (b.id - a.id);   // 0.7.1: 최신 완료가 위로
+  let shown = list.filter(t => filter === "all" ? true : filter === "done" ? fin(t) : filter === "hidden" ? t.hidden : !fin(t) && !t.hidden);
+  if (filter === "done") shown.sort(byDone);
+  else if (filter === "all") shown = [...shown.filter(t => !fin(t)), ...shown.filter(fin).sort(byDone)];
   const nDone = list.filter(t => fin(t) && !t.hidden).length;
   const seg = h("div", { class: "seg" }, [["open", "진행 중"], ["done", `완료 (${nDone})`], ["all", "전체"], ["hidden", "삭제한 업무"]].map(([k, t]) =>
     h("button", { class: filter === k ? "on" : "", onclick: () => { box.dataset.f = k; renderTasks(box, uid, readonly, refreshAll); } }, t)));
@@ -769,7 +785,8 @@ async function pageMyIssues() {
   const list = await api("GET", "/api/issues?scope=mine");
   dotSeen("myissues");
   const full = (await Promise.all(list.map(i => api("GET", `/api/issues/${i.id}`)))).map((x, k) => ({ ...x, mflag: list[k].mflag }));
-  const open = full.filter(i => !(i.done || i.stage === 6)), done = full.filter(i => i.done || i.stage === 6);
+  const dk = i => i.done || "";
+  const open = full.filter(i => !(i.done || i.stage === 6)), done = full.filter(i => i.done || i.stage === 6).sort((a, b) => dk(b).localeCompare(dk(a)) || (b.id - a.id));   // 0.7.1: 최신 완료가 위로
   const root = h("div", {}, h("div", { class: "row page-hd" }, h("h1", {}, "내 이슈", h("span", { class: "sub" }, `진행 ${open.length} · 완료 ${done.length}`)), h("div", { class: "spacer" }),
     h("button", { class: "btn sm", onclick: () => { for (const c of root.querySelectorAll(".issue-card")) c.classList.add("open"); } }, "모두 펴기"),
     h("button", { class: "btn sm", onclick: () => { for (const c of root.querySelectorAll(".issue-card")) c.classList.remove("open"); } }, "모두 접기")),
@@ -891,7 +908,7 @@ function issueActivity(i) {
     const m = i.members.find(x => x.user_id === uid);
     const logs = byUser[uid] || [];
     return h("div", { class: "card", style: "margin-bottom:10px" },
-      h("div", { class: "row" }, h("b", {}, userName(uid)), badge("role", m?.role || "담당 해제"), h("span", { class: "muted small" }, `투입 ${fmtH(logs.reduce((a, l) => a + l.hours, 0))}h · 기록 ${logs.filter(l => l.text).length}건`)),
+      h("div", { class: "row" }, h("b", {}, userName(uid)), (() => { const pu = M.users.find(x => x.id === uid); const plm = !m && pu?.role === "pl" && pu.part === i.part; return badge(m ? "role" : plm ? "pl" : "warn", m?.role || (plm ? "PL 관리" : "담당 해제")); })(), h("span", { class: "muted small" }, `투입 ${fmtH(logs.reduce((a, l) => a + l.hours, 0))}h · 기록 ${logs.filter(l => l.text).length}건`)),
       h("div", { class: "small", style: "margin:6px 0" }, `할 일: ${m?.duty || "-"}  ·  분류: ${m?.category || "-"}`),
       logs.length ? h("div", { class: "timeline" }, logs.slice(0, 30).map(l => h("div", { class: "it" }, h("div", { class: "d" }, `${l.date} · ${fmtH(l.hours)}h`), h("div", { class: "pre" }, l.text || h("span", { class: "muted" }, "(시간만)"))))) : h("div", { class: "muted small" }, "기록 없음"));
   }) : h("div", { class: "muted" }, "담당자가 없습니다."));

@@ -169,6 +169,6 @@ db.execute("INSERT INTO notifs(user_id,kind,text,link) VALUES(?,?,?,?)", (mem2_u
 check("미입력 알림은 🔔만 (팝업 아님)", pops(mem2) == [] and mem2.req("GET", "/api/notifs")[1]["unread"] >= 1)
 st, d = mem.req("POST", "/api/dots/seen", {"tab": "x"}); check("잘못된 탭", st == 400)
 st, d = mem.req("POST", "/api/dots/clear", {"type": "x", "id": 1}); check("잘못된 종류", st == 400)
-check("버전 0.7.0", urllib.request.urlopen(BASE + "/version").read().decode() == "업무관리 0.7.0")
+check("버전 0.7.0 이상", urllib.request.urlopen(BASE + "/version").read().decode() >= "업무관리 0.7.0")
 print(f"0.7.0 시험: 통과 {ok} · 실패 {bad}")
 sys.exit(1 if bad else 0)

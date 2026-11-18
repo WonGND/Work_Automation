@@ -20,7 +20,7 @@ import CSS from "../public/style.css" with { type: "text" };
 import { GUIDE } from "./guide_img";
 import { createHash } from "node:crypto";
 
-export const VERSION = "업무관리 0.7.0";
+export const VERSION = "업무관리 0.7.1";
 const args = process.argv.slice(2);
 const ENVK: Record<string, string> = { "--port": "WL_PORT", "--data": "WL_DATA", "--cert": "WL_TLS_CERT", "--key": "WL_TLS_KEY", "--http-port": "WL_HTTP_PORT", "--key-file": "WL_KEY_FILE", "--seed": "WL_SEED" };
 const arg = (k: string, d: string) => { const i = args.indexOf(k); if (i >= 0 && args[i + 1]) return args[i + 1]; const e = ENVK[k] && process.env[ENVK[k]]; return e || d; };
@@ -120,6 +120,7 @@ remind(); setInterval(remind, 10 * 60e3);
 const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'";
 // 버전이 바뀌면 모든 사람에게 알림 (우상단 🔔)
 const NOTES: Record<string, string> = {
+  "업무관리 0.7.1": "완료된 업무 · 이슈는 최신 완료일이 위로 (시간 입력 표 '완료' 묶음 · 업무 목록 · 내 이슈) · PL은 담당이 아니어도 우리 파트 진행 중 이슈가 '내 업무' 시간 입력 표에 'PL 관리'로 보임 (시간 입력 가능 · 누르면 이슈 창에서 4칸 · 정보 수정) · PL만 '내 업무'에 '+ 이슈 등록' 버튼 · 비밀번호 칸에서 Caps Lock 이 켜져 있으면 안내",
   "업무관리 0.7.0": "알림을 화면 가운데 팝업으로 (공지 · 업무 지정/변경 · 이슈 담당 지정/변경 · 요청 도착/답변 · 업데이트 안내, '확인'을 눌러야 닫힘 · 🔔 숫자도 같이 · 미입력 알림은 🔔만) · 공지 메뉴 (마스터 · 팀장이 전체 · 파트 · 개인에게 보냄 · 지난 공지 보기) · 버전이 바뀌면 마스터에게 공지 초안 → 고쳐서 배포 (자동 버전 알림 없앰) · 업무 지정에 '요약' 칸 · 새로 지정되거나 바뀐 업무 · 이슈에 빨간 점 (탭의 점은 탭을 열면, 행의 점은 행을 누르면 꺼짐)",
   "업무관리 0.6.0": "이슈 진행 현황을 4칸으로 (현상 · 원인 분석 · 개선검토 · 검증 및 적용) — 이슈를 누르면 왼쪽에 이슈 정보, 오른쪽에 4칸 · PL · 팀장 · 마스터가 씀 · 예전 진행현황은 '현상', 원인은 '원인 분석', 대응 계획은 '개선검토' 칸에 그대로 · 이슈 첨부 이미지 한 장 (붙여넣기 Ctrl+V · 끌어다 놓기 · 파일 고르기, 이슈 정리의 🖼 버튼으로 보기) · 이슈 요약에 발생일 · 현재 진행 칸 · 담당은 정 · 부1 · 부2 순서로 이름만 · 모든 표 머리글 가운데 정렬 · 업무로드 · 요약 기간에 이전 / 다음 버튼 (주 · 월 · 연) · 내 업무 시간 입력 표 월간 보기 · 기준정보 모델 여러 줄 한 번에 추가 · 모델 삭제(숨김) · 되살리기 · 업무 추가 창에서 모델 · 업무 분류 검색",
   "업무관리 0.5.8": "엑셀 가져오기: 이슈 정리의 지연 사유도 가져옴 (엑셀 이슈 정리의 담당 · 맡은 일 · 진행현황 · 단계를 다시 맞춤)",
@@ -140,6 +141,7 @@ const NOTES: Record<string, string> = {
 const NOTICE: [string, string[]][] = [
   ["업무관리 0.6.0", ["이슈를 누르면 진행 현황 4칸 (현상 · 원인 분석 · 개선검토 · 검증 및 적용) — PL · 팀장이 작성", "이슈 첨부 이미지 한 장 (Ctrl+V · 끌어다 놓기), 이슈 정리 🖼 버튼으로 보기", "이슈 요약에 발생일 · 현재 진행 추가", "내 업무 월간 보기, 업무로드 이전 / 다음 버튼", "업무 추가 창에서 모델 · 업무 분류 검색"]],
   ["업무관리 0.7.0", ["업무 · 이슈가 지정되거나 바뀌면 화면 가운데 팝업 ('확인'을 눌러야 닫힘)", "새로 지정된 업무 · 이슈에 빨간 점 표시", "공지 메뉴 추가 (지난 공지 보기)"]],
+  ["업무관리 0.7.1", ["완료된 업무 · 이슈는 최신 완료일이 위로", "PL은 우리 파트 이슈가 '내 업무'에 'PL 관리'로 보임 (시간 입력 · 누르면 수정), '+ 이슈 등록' 버튼", "비밀번호 입력 시 Caps Lock 안내"]],
 ];
 {
   const last = getSetting("last_version", "");

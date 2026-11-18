@@ -165,7 +165,7 @@ function weekData(uid: number, from: string, n = 7) {   // n = 7 (주간) 또는
     const started = !tk.start || tk.start <= to;
     if (!tk.fixed && !has && (tk.hidden || (fin && tk.done && tk.done < from) || !started)) continue;
     const texts = Object.fromEntries(q("SELECT date,text FROM task_notes WHERE task_id=? AND date BETWEEN ? AND ? AND text<>''", tk.id, from, to).map((r: any) => [r.date, r.text]));
-    rows.push({ type: "task", id: tk.id, kind: tk.kind, title: tk.title, model: tk.model_id ? c.models.get(tk.model_id)?.name : "", fixed: tk.fixed, hidden: tk.hidden, done: fin, hours: hrs, texts,
+    rows.push({ type: "task", id: tk.id, kind: tk.kind, title: tk.title, model: tk.model_id ? c.models.get(tk.model_id)?.name : "", fixed: tk.fixed, hidden: tk.hidden, done: fin, doneAt: fin ? (tk.done || "") : "", hours: hrs, texts,
       assigned: tk.assigned_by ? (q1("SELECT name FROM users WHERE id=?", tk.assigned_by)?.name || "") : "", progress: tk.progress, flag: tk.flag ? 1 : 0 });
   }
   const iss = q(`SELECT i.*, m.role, m.flag mflag FROM issues i JOIN issue_members m ON m.issue_id=i.id WHERE m.user_id=? ORDER BY i.no`, uid);
@@ -175,14 +175,28 @@ function weekData(uid: number, from: string, n = 7) {   // n = 7 (주간) 또는
     const logs = q("SELECT date,hours,text FROM issue_logs WHERE issue_id=? AND user_id=? AND date BETWEEN ? AND ?", i.id, uid, from, to);
     const fin = stageDone(i);
     if (!logs.length && (i.hidden || (fin && i.done && i.done < from))) continue;
-    rows.push({ type: "issue", id: i.id, no: i.no, title: i.title, role: i.role, duty: q1("SELECT duty FROM issue_members WHERE issue_id=? AND user_id=?", i.id, uid)?.duty || "", model: i.model_id ? c.models.get(i.model_id)?.name : "", hidden: i.hidden, done: fin, flag: i.mflag ? 1 : 0,
+    rows.push({ type: "issue", id: i.id, no: i.no, title: i.title, role: i.role, duty: q1("SELECT duty FROM issue_members WHERE issue_id=? AND user_id=?", i.id, uid)?.duty || "", model: i.model_id ? c.models.get(i.model_id)?.name : "", hidden: i.hidden, done: fin, doneAt: fin ? (i.done || "") : "", flag: i.mflag ? 1 : 0,
       hours: Object.fromEntries(logs.map((l: any) => [l.date, l.hours])), texts: Object.fromEntries(logs.filter((l: any) => l.text).map((l: any) => [l.date, l.text])) });
+  }
+  // 0.7.1: PL은 담당이 아니어도 우리 파트 이슈가 보임 ('PL 관리' 행 · 시간 입력 가능 · 누르면 이슈 창에서 고침)
+  //        진행 중 이슈 전부 + 완료 · 삭제한 이슈는 이 기간에 PL 기록이 있을 때만
+  const pu = q1("SELECT role, part FROM users WHERE id=?", uid);
+  if (pu?.role === "pl" && pu.part) {
+    for (const i of q(`SELECT i.* FROM issues i JOIN models m ON m.id=i.model_id WHERE m.part=? ORDER BY i.no`, pu.part)) {
+      if (seen.has(i.id)) continue;
+      const logs = q("SELECT date,hours,text FROM issue_logs WHERE issue_id=? AND user_id=? AND date BETWEEN ? AND ?", i.id, uid, from, to);
+      const fin = stageDone(i);
+      if (!logs.length && (i.hidden || fin || (i.occurred && i.occurred > to))) continue;
+      seen.add(i.id);
+      rows.push({ type: "issue", id: i.id, no: i.no, title: i.title, role: "PL 관리", plManage: true, duty: "", model: i.model_id ? c.models.get(i.model_id)?.name : "", hidden: i.hidden, done: fin, doneAt: fin ? (i.done || "") : "", flag: 0,
+        hours: Object.fromEntries(logs.map((l: any) => [l.date, l.hours])), texts: Object.fromEntries(logs.filter((l: any) => l.text).map((l: any) => [l.date, l.text])) });
+    }
   }
   // 담당에서 빠졌지만 이번 주 기록이 있는 이슈 (기록 보존)
   for (const i of q(`SELECT DISTINCT i.* FROM issues i JOIN issue_logs l ON l.issue_id=i.id WHERE l.user_id=? AND l.date BETWEEN ? AND ?`, uid, from, to)) {
     if (seen.has(i.id)) continue;
     const logs = q("SELECT date,hours,text FROM issue_logs WHERE issue_id=? AND user_id=? AND date BETWEEN ? AND ?", i.id, uid, from, to);
-    rows.push({ type: "issue", id: i.id, no: i.no, title: i.title, role: "담당 해제", released: true, model: i.model_id ? c.models.get(i.model_id)?.name : "", hidden: i.hidden, done: stageDone(i),
+    rows.push({ type: "issue", id: i.id, no: i.no, title: i.title, role: "담당 해제", released: true, model: i.model_id ? c.models.get(i.model_id)?.name : "", hidden: i.hidden, done: stageDone(i), doneAt: stageDone(i) ? (i.done || "") : "",
       hours: Object.fromEntries(logs.map((l: any) => [l.date, l.hours])), texts: Object.fromEntries(logs.filter((l: any) => l.text).map((l: any) => [l.date, l.text])) });
   }
   const lv = q("SELECT start,end FROM leaves WHERE user_id=?", uid);
@@ -641,7 +655,8 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       if (uid !== me.id && me.role !== "master") err(403, "본인 기록만 넣을 수 있습니다");
       const isMem = q1("SELECT 1 FROM issue_members WHERE issue_id=? AND user_id=?", iss.id, uid);
       const had = q1("SELECT * FROM issue_logs WHERE issue_id=? AND user_id=? AND date=?", iss.id, uid, date);
-      if (!isMem && !had) err(403, "담당이 아닌 이슈에는 기록할 수 없습니다");
+      const plOf = !isMem && q1("SELECT 1 FROM users WHERE id=? AND role='pl' AND part=?", uid, partOfModel(iss.model_id) || "\u0000");   // 0.7.1: 우리 파트 PL (PL 관리)
+      if (!isMem && !had && !plOf) err(403, "담당이 아닌 이슈에는 기록할 수 없습니다 (우리 파트 PL은 기록 가능)");
       const text = "text" in body ? str(body.text, 1000) : had?.text || "";
       if (h === 0 && !text) run("DELETE FROM issue_logs WHERE issue_id=? AND user_id=? AND date=?", iss.id, uid, date);
       else run(`INSERT INTO issue_logs(issue_id,user_id,date,hours,text) VALUES(?,?,?,?,?) ON CONFLICT(issue_id,user_id,date)

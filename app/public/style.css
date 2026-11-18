@@ -595,3 +595,7 @@ nav a:has(.ndot){padding-right:16px}
 .nt-ttl{font-size:15.5px}
 .nt-body{margin-top:8px;line-height:1.7;overflow-wrap:anywhere}
 html[data-dark="1"] .card.notice.draft{background:#262213}
+
+/* ── 0.7.1 ── */
+.caps-tip{margin:4px 0 8px;font-size:12.5px;font-weight:600;color:#b42318;background:#fef3f2;border:1px solid #fecdca;border-radius:6px;padding:3px 8px;width:max-content;max-width:100%}
+html[data-dark="1"] .caps-tip{color:#ffb4a9;background:#3a1714;border-color:#6b2a24}

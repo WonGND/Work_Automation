@@ -73,6 +73,7 @@ python3 tools/v056_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데�
 python3 tools/v057_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 미입력 알림 · 화면 갱신 번호 · 가져오기 권한 (14건)
 python3 tools/v060_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 이슈 4칸 · 첨부 이미지 · 월간 표 · 모델 여러 줄/숨김 (74건)
 python3 tools/v070_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 팝업 알림 · 공지 · 버전 공지 초안 · 빨간 점 (68건)
+python3 tools/v071_test.py  http://127.0.0.1:8000 acc.txt sample/seed.json <데이터>/업무관리.db   # 완료 최신순 · PL 관리 이슈 행 · PL 이슈 등록 (26건)
 python3 tools/mail_test.py  http://127.0.0.1:8000 <비밀번호> 홍길동           # 메일 · 비밀번호 찾기 (15건, aiosmtpd 필요)
 ```
 
@@ -82,10 +83,10 @@ python3 tools/mail_test.py  http://127.0.0.1:8000 <비밀번호> 홍길동      
 
 ```bash
 cd app && bun build --compile --target=bun-linux-x64-baseline src/server.ts --outfile ../wl_base && cd ..
-python3 tools/mk_image.py wl_base sample/seed.json workmgmt-0.7.0.tar workmgmt:0.7.0
+python3 tools/mk_image.py wl_base sample/seed.json workmgmt-0.7.1.tar workmgmt:0.7.1
 ```
 
-NAS에서 `docker load -i workmgmt-0.7.0.tar` 후 `deploy/docker-compose.yml`로 실행합니다. `data`(DB · 백업)와 `keys`(암호화 열쇠 · 인증서)는 컨테이너 밖 폴더라 이미지를 바꿔도 그대로 남습니다.
+NAS에서 `docker load -i workmgmt-0.7.1.tar` 후 `deploy/docker-compose.yml`로 실행합니다. `data`(DB · 백업)와 `keys`(암호화 열쇠 · 인증서)는 컨테이너 밖 폴더라 이미지를 바꿔도 그대로 남습니다.
 
 ## 설정 (환경 변수)
 
