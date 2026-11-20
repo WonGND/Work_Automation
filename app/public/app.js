@@ -367,7 +367,7 @@ function buildNav() {
   if (P.sheet) items.push(["#/me", "내 업무"], ["#/myissues", "내 이슈"]);
   if (P.pl) items.push(["#/part", "우리 파트 이슈"]);
   if (P.assign) items.push(["#/assign", "업무 지정"]);
-  if (P.admin) items.push(["#/dash", "업무로드"], ["#/summary", "이슈 요약"], ["#/registry", "이슈 정리"], ["#/people", "사람별"]);
+  if (P.admin) items.push(["#/dash", "업무로드"], ["#/registry", "이슈 정리"], ["#/people", "사람별"]);
   if (P.std) items.push(["#/master", "기준정보"]);
   if (P.admin) items.push(["#/admin", "관리"]);
   items.push(["#/notices", "공지"], ["#/requests", "요청"]);
@@ -449,7 +449,7 @@ async function route() {
     if (hs === "#/part") return pageIssues("part");
     if (hs === "#/assign") return pageAssign();
     if (hs === "#/dash") return pageDash();
-    if (hs === "#/summary") return pageSummary();
+    if (hs === "#/summary" || (hs === "#/registry" && !M.perms.admin)) { location.hash = M.perms.admin ? "#/registry" : M.perms.pl ? "#/part" : "#/myissues"; return; }   // 0.7.2: 이슈 요약은 이슈 정리로 합침 · 권한 없으면 볼 수 있는 이슈 화면으로
     if (hs === "#/registry") return pageIssues("all");
     if ((m = hs.match(/^#\/people(?:\/(\d+))?$/))) return pagePeople(m[1] ? Number(m[1]) : 0);
     if (hs === "#/master") return pageMaster();
@@ -528,7 +528,7 @@ async function pageMe(uid, readonly) {
   let statT = 0; weekBox.addEventListener("hours-saved", () => { clearTimeout(statT); statT = setTimeout(() => loadStats().catch(() => {}), 600); });
   const refresh = async () => { await Promise.all([loadStats(), renderWeek(weekBox, uid, readonly, refresh), renderTasks(taskBox, uid, readonly, refresh)]); };
   if (!readonly && uid === M.user.id) dotSeen("me");
-  const head = h("div", { class: "row page-hd" }, h("h1", {}, readonly ? `${u.name}` : "내 업무", h("span", { class: "sub" }, `${u.part} · ${roleKo[u.role]}`)), h("div", { class: "spacer" }));
+  const head = h("div", { class: "row page-hd" }, h("h1", {}, readonly ? `${u.name}` : "내 업무", h("span", { class: "sub" }, `${u.part} · ${roleKo[u.role]}` + (readonly && !M.perms.admin ? " · 읽기 전용 (일을 준 사람)" : ""))), h("div", { class: "spacer" }));
   const loadStats = async () => {
     const s = await api("GET", `/api/stats?user=${uid}&${perQs()}`);
     statBox.replaceChildren(h("div", { class: "row", style: "margin-bottom:8px" }, h("b", {}, "요약 기간"), periodBar(loadStats)), statCards(s));
@@ -577,8 +577,12 @@ async function renderWeek(box, uid, readonly, refreshAll) {
         else cls = "okd";
       }
       if (totals[d.date] > w.dayHours) { cls = "overd"; tip = `${w.dayHours}h 초과`; }
-      const v = totals[d.date] + leave[d.date];
-      return h("td", { class: "c " + cls, title: tip }, h("b", {}, v ? fmtH(v) : (d.past && d.workday ? "0" : "")), tip ? h("div", { class: "small" }, tip) : "");
+      // 0.7.2: 합계는 일한 시간만 (휴가 · 조퇴 시간은 빼고), 숫자 아래에 연차(8h) · 반차(4h) · 휴가 n h · 조퇴
+      const lv = leave[d.date], v = totals[d.date];
+      const lvTag = [lv >= w.dayHours ? "연차" : lv === w.dayHours / 2 ? "반차" : lv > 0 ? `휴가 ${fmtH(lv)}h` : "", early[d.date] > 0 ? "조퇴" : ""].filter(Boolean).join(" · ");
+      if (tip === "휴가") tip = "";
+      const showV = v ? fmtH(v) : (lv > 0 || (d.past && d.workday && !d.leave) ? "0" : "");
+      return h("td", { class: "c " + cls, title: [lvTag, tip].filter(Boolean).join(" · ") }, h("b", {}, showV), lvTag ? h("div", { class: "lvtag" }, lvTag) : "", tip ? h("div", { class: "small" }, tip) : "");
     }), h("td", { class: "c tot" }, h("b", {}, fmtH(Object.values(totals).reduce((a, b) => a + b, 0)))));
   };
   const allInputs = [];
@@ -818,7 +822,7 @@ function issueCard(i) {
       h("div", {}, h("b", {}, "Target (PL)"), i.target || "-"), h("div", {}, h("b", {}, "담당 (정 · 부1 · 부2)"), ["정", "부1", "부2"].map(r => i.members.find(m => m.role === r)).filter(Boolean).map(m => m.name).join(" · ") || "-"), h("div", {}, h("b", {}, "진척"), Math.round(i.progress * 100) + "%")),
     h("div", { class: "row", style: "margin:10px 0 6px" }, h("b", {}, "진행 현황"), h("span", { class: "muted small" }, "PL · 팀장이 씁니다"), h("div", { class: "spacer" }),
       h("button", { class: "btn sm", onclick: () => issueBoard(i, () => route()) }, i.has_image ? "크게 보기 · 🖼 첨부 이미지" : "크게 보기")),
-    h("div", { class: "ibox-grid mini" }, IBOX.map(([k, t, , cls, ic]) => h("section", { class: "ibox " + cls }, h("div", { class: "ibox-hd" }, h("span", { class: "ibox-ic", html: ic }), h("b", {}, t)), h("div", { class: "ibox-ro pre" }, i[k] || h("span", { class: "muted" }, "-"))))),
+    h("div", { class: "ibox-grid mini" }, IBOX.map(([k, t, , cls, ic]) => h("section", { class: "ibox " + cls }, h("div", { class: "ibox-hd" }, h("span", { class: "ibox-ic", html: ic }), h("b", {}, t)), h("div", { class: "ibox-ro" }, boxLines(i, k))))),
     h("div", { class: "form", style: "margin-top:12px" }, ...field("단계 (PL)", stage),
       ...field("지연 사유 (PL)", h("div", {}, delay, h("div", { class: "lock" }, "🔒 PL만 입력합니다"))), ...field("내 업무 분류", cat)),
     h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn pri", onclick: async () => {
@@ -836,35 +840,45 @@ function issueCard(i) {
 // ── 이슈 목록 (PL: 우리 파트 / 팀장: 전체) ──
 async function pageIssues(scope) {
   const root = h("div"); app().replaceChildren(root);
-  const st = { done: false, hidden: false, part: "", model: "" };
+  const st = { done: false, hidden: false, part: "", model: "", card: "" };
+  const isDone = i => !!(i.done || i.stage === 6);
+  // 0.7.2: 맨 위 카드 (예전 '이슈 요약') — 누르면 그 조건으로 표를 거름, 한 번 더 누르면 풀림
+  const CARDS = [["open", "진행", i => !isDone(i)], ["late", "지연", i => !isDone(i) && i.sched.cls === "late", "late"], ["soon", "임박", i => !isDone(i) && i.sched.cls === "soon", "soon"],
+    ["done", "완료", isDone], ["delay", "지연 사유 미입력", i => !isDone(i) && i.needDelay, "late"]];
   const load = async () => {
     const qs = scope === "all" ? `scope=all${st.hidden ? "&hidden=1" : ""}` : `scope=part`;
     const all = await api("GET", `/api/issues?${qs}`);
-    const nDone = all.filter(i => i.done || i.stage === 6).length;
-    const byPart = all.filter(i => st.done || !(i.done || i.stage === 6)).filter(i => !st.part || i.part === st.part);
+    const nDone = all.filter(isDone).length;
+    const inPart = all.filter(i => !st.part || i.part === st.part);
+    const live = inPart.filter(i => !i.hidden);
+    const cf = CARDS.find(c => c[0] === st.card);
+    const byPart = inPart.filter(i => cf ? cf[2](i) : (st.done || !isDone(i)));
     const mNames = [...new Set(byPart.map(i => i.model || ""))].sort((a, b) => !a ? 1 : !b ? -1 : a.localeCompare(b, "ko"));
     if (st.model && !mNames.includes(st.model === "-" ? "" : st.model)) st.model = "";
     const list = byPart.filter(i => !st.model || (i.model || "") === (st.model === "-" ? "" : st.model));
     const head = h("div", { class: "row page-hd" }, h("h1", {}, scope === "all" ? "이슈 정리" : `우리 파트 이슈 (${M.perms.plPart})`, h("span", { class: "sub" }, `${list.length}건`)), h("div", { class: "spacer" }),
       scope === "all" ? sel([["", "모든 파트"], ...M.parts.map(p => [p, p])], st.part, { onchange: e => { st.part = e.target.value; load(); } }) : "",
       sel([["", `모든 모델 (${byPart.length})`], ...mNames.map(n => [n || "-", `${n || "모델 없음"} (${byPart.filter(i => (i.model || "") === n).length})`])], st.model, { onchange: e => { st.model = e.target.value; load(); } }),
-      h("label", { class: "small chk" }, h("input", { type: "checkbox", checked: st.done, onchange: e => { st.done = e.target.checked; load(); } }), ` 완료 포함 (${nDone})`),
+      h("label", { class: "small chk" + (cf ? " dim" : "") }, h("input", { type: "checkbox", checked: st.done, disabled: !!cf, onchange: e => { st.done = e.target.checked; load(); } }), ` 완료 포함 (${nDone})`),
       scope === "all" ? h("label", { class: "small chk" }, h("input", { type: "checkbox", checked: st.hidden, onchange: e => { st.hidden = e.target.checked; load(); } }), " 삭제한 이슈 포함") : "",
       h("button", { class: "btn pri", onclick: () => issueModal(null, load) }, "+ 새 이슈"));
     const rows = list.map(i => {
       const mem = r => nameTag(i.members.find(m => m.role === r)?.name || "");
-      return h("tr", { class: "click" + (i.hidden ? " muted" : "") + (i.done || i.stage === 6 ? " is-done" : ""), onclick: () => issueModal(i, load) },
-        h("td", { class: "nowrap" }, h("b", {}, i.no)), h("td", {}, i.model, h("div", { class: "small muted" }, i.part)), h("td", { class: "small" }, i.source), h("td", { class: "ttl" }, i.title, i.hidden ? [" ", badge("warn", "삭제됨")] : "", i.plAssigned.length ? [" ", badge("warn", "PL 담당 → 재지정")] : ""),
-        h("td", {}, mem("정")), h("td", {}, mem("부1")), h("td", {}, mem("부2")), h("td", { class: "nowrap small" }, i.occurred || ""), h("td", { class: "nowrap small" }, i.target || ""),
-        h("td", {}, badge(i.sched.cls, i.sched.text)), h("td", { class: "nowrap small" }, M.stages[(i.stage || 1) - 1] || ""), h("td", { class: "small pre status" }, nowCell(i)),
-        h("td", { class: "small pre" }, i.needDelay ? badge("late", "지연 사유 필요") : (i.delay_reason || "")),
+      return h("tr", { class: "click" + (i.hidden ? " muted" : "") + (isDone(i) ? " is-done" : ""), onclick: () => issueModal(i, load) },
+        h("td", { class: "nowrap no" }, i.no), h("td", {}, i.model, h("div", { class: "sub2" }, i.part)), h("td", {}, i.source), h("td", { class: "ttl" }, i.title, i.hidden ? [" ", badge("warn", "삭제됨")] : "", i.plAssigned.length ? [" ", badge("warn", "PL 담당 → 재지정")] : ""),
+        h("td", {}, mem("정")), h("td", {}, mem("부1")), h("td", {}, mem("부2")), h("td", { class: "nowrap" }, i.occurred || ""), h("td", { class: "nowrap" }, i.target || ""),
+        h("td", { class: "c" }, isDone(i) ? badge("done", "완료") : badge(i.sched.cls, i.sched.text)), h("td", { class: "nowrap" }, M.stages[(i.stage || 1) - 1] || ""), h("td", { class: "pre status" }, nowCell(i)),
+        h("td", { class: "pre" }, i.needDelay ? badge("late", "지연 사유 필요") : (i.delay_reason || "")),
         h("td", { class: "c" }, i.has_image ? h("button", { class: "btn sm img-btn", title: "첨부 이미지 보기", onclick: e => { e.stopPropagation(); imageView(i); } }, "🖼") : ""));
     });
     const table = h("table", { class: "issues" }, h("thead", {}, h("tr", {}, ["번호", "모델", "발생처", "이슈명", "정", "부1", "부2", "발생일", "Target", "일정", "단계", "현재 진행", "지연 사유", "첨부"].map(x => h("th", {}, x)))),
       h("tbody", {}, rows.length ? rows : h("tr", {}, h("td", { colspan: 14, class: "c muted" }, "이슈가 없습니다"))));
     resizable(table, "issues-" + scope);
-    root.replaceChildren(head,
-      h("div", { class: "help" }, "이슈를 누르면 왼쪽에 이슈 정보, 오른쪽에 진행 현황 4칸(현상 · 원인 분석 · 개선검토 · 검증 및 적용)이 열립니다. '현재 진행'은 내용이 있는 가장 뒤 칸입니다. 🖼 = 첨부 이미지 보기. 이슈는 PL이 등록하고 정 · 부1 · 부2와 각자의 할 일을 지정합니다. 목표일이 지났는데 끝나지 않았으면 지연 사유를 적어 주세요."),
+    const cards = h("div", { class: "cards icards" }, CARDS.map(([k, t, f, cl]) => { const n = live.filter(f).length;
+      return h("button", { class: "card stat" + (cl && n ? " k-" + cl : "") + (st.card === k ? " on" : ""), title: st.card === k ? "다시 누르면 전체" : `${t}만 보기`, onclick: () => { st.card = st.card === k ? "" : k; load(); } }, h("div", { class: "k" }, t), h("div", { class: "v" }, n + "건")); }));
+    root.replaceChildren(head, cards,
+      cf ? h("div", { class: "row filt" }, badge(cf[3] || "role", `${cf[1]}만 보는 중`), h("button", { class: "btn sm", onclick: () => { st.card = ""; load(); } }, "전체 보기")) : "",
+      h("div", { class: "help" }, "이슈를 누르면 왼쪽에 이슈 정보, 오른쪽에 진행 현황 4칸(현상 진단 · 원인 규명 · 대책 수립 · 검증 적용)이 열립니다. 맨 위 칸을 누르면 그 조건만 봅니다. '현재 진행'은 내용이 있는 가장 뒤 칸입니다. 🖼 = 첨부 이미지 보기. 이슈는 PL이 등록하고 정 · 부1 · 부2와 각자의 할 일을 지정합니다. 목표일이 지났는데 끝나지 않았으면 지연 사유를 적어 주세요."),
       h("div", { class: "tbl" }, table));
   };
   await load();
@@ -872,12 +886,21 @@ async function pageIssues(scope) {
 
 // 진행 현황 4칸: [칸(DB 열), 이름, 안내 질문, 색, 아이콘]
 const IBOX = [
-  ["status_text", "현상", "어떤 문제가 발생했는지?", "b1", '<svg viewBox="0 0 24 24"><path d="M12 5v9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="12" cy="18.5" r="1.8" fill="currentColor"/></svg>'],
-  ["cause", "원인 분석", "왜 이런 문제가 발생했는지?", "b2", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M15 15l4.5 4.5"/></svg>'],
-  ["plan", "개선검토", "어떻게 개선할 수 있을지?", "b3", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6M10 20h4M12 4a6 6 0 0 0-3.5 10.9c.5.4.8 1 .8 1.6V17h5.4v-.5c0-.6.3-1.2.8-1.6A6 6 0 0 0 12 4z"/></svg>'],
-  ["verify", "검증 및 적용", "개선안이 잘 적용되었는지?", "b4", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12.5l4 4 8-9"/></svg>'],
+  ["status_text", "현상 진단", "어떤 문제가 발생했는지?", "b1", '<svg viewBox="0 0 24 24"><path d="M12 5v9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="12" cy="18.5" r="1.8" fill="currentColor"/></svg>'],
+  ["cause", "원인 규명", "왜 이런 문제가 발생했는지?", "b2", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M15 15l4.5 4.5"/></svg>'],
+  ["plan", "대책 수립", "어떻게 개선할 수 있을지?", "b3", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17h6M10 20h4M12 4a6 6 0 0 0-3.5 10.9c.5.4.8 1 .8 1.6V17h5.4v-.5c0-.6.3-1.2.8-1.6A6 6 0 0 0 12 4z"/></svg>'],
+  ["verify", "검증 적용", "개선안이 잘 적용되었는지?", "b4", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12.5l4 4 8-9"/></svg>'],
 ];
 const nowCell = i => (i.now ? [badge("now " + (IBOX.find(b => b[0] === i.now.key)?.[3] || ""), i.now.label), " ", i.now.text] : "");
+// 0.7.2: 칸별 템플릿 항목 (서버 M.issueTpl) · 글이 늘면 칸이 따라 늘어남
+const tplItems = k => (M.issueTpl || []).find(b => b.key === k)?.items || [];
+const grow = ta => { ta.style.height = "auto"; ta.style.height = Math.max(ta.scrollHeight + 2, 34) + "px"; };
+// 읽기용: 칸의 채운 항목 (+ 이전 기록)
+function boxLines(i, k) {
+  const out = tplItems(k).filter(it => (i.items || {})[it.code]).map(it => h("div", { class: "iline" }, h("b", {}, `${it.code} ${it.label}`), h("div", { class: "pre" }, i.items[it.code])));
+  if (i[k]) out.push(h("div", { class: "iline old" }, h("b", {}, "이전 기록"), h("div", { class: "pre" }, i[k])));
+  return out.length ? out : [h("span", { class: "muted" }, "-")];
+}
 const imgUrl = (i, at) => `/api/issues/${i.id}/image?v=${encodeURIComponent(at ?? i.image_at ?? "")}`;
 // 첨부 이미지 크게 보기 (바깥 · Esc로 닫기)
 function imageView(i, at) {
@@ -892,13 +915,32 @@ async function shrinkImage(file) {
   if (file.type === "image/gif") return file;
   let bmp; try { bmp = await createImageBitmap(file); } catch { return file; }
   const mx = Math.max(bmp.width, bmp.height);
-  if (mx <= 1920 && file.size <= 4 * 1024 * 1024) return file;
+  const okType = /^image\/(png|jpeg|webp)$/.test(file.type);   // BMP 등은 PNG로 바꿔서 올림
+  if (okType && mx <= 1920 && file.size <= 4 * 1024 * 1024) return file;
   const s = Math.min(1, 1920 / mx), c = document.createElement("canvas");
   c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
   const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
   const blob = (t, q) => new Promise(r => c.toBlob(r, t, q));
   let b = await blob("image/png"); if (!b || b.size > 3 * 1024 * 1024) b = await blob("image/jpeg", 0.9);
   return b || file;
+}
+// 0.7.2: 붙여넣기 · 끌어놓기에서 이미지 꺼내기 (클립보드 항목 → 파일 → HTML 안의 그림 순서)
+function clipImage(dt) {
+  if (!dt) return null;
+  for (const it of [...(dt.items || [])]) if (it.kind === "file" && /^image\//.test(it.type)) { const f = it.getAsFile(); if (f) return f; }
+  const f = [...(dt.files || [])].find(x => /^image\//.test(x.type) || /\.(png|jpe?g|gif|webp|bmp)$/i.test(x.name)); if (f) return f;
+  const html = (dt.getData && dt.getData("text/html")) || "";
+  const m = html.match(/<img[^>]+src="data:(image\/[a-z+.-]+);base64,([^"]+)"/i);
+  if (m) { try { const bin = atob(m[2].replace(/\s+/g, "")); const u = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k); return new File([u], "paste." + (m[1].split("/")[1] || "png"), { type: m[1] }); } catch {} }
+  return null;
+}
+const editableTarget = e => { const t = e.target; return !!t && (t.isContentEditable || t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !["checkbox", "radio", "button", "file"].includes(t.type))); };
+const NO_IMG = "붙여넣은 내용에 이미지가 없습니다. 그림을 복사(캡처 · 이미지 복사)한 뒤 Ctrl + V 해 주세요";
+async function putImage(id, f) {
+  const b = await shrinkImage(f);
+  const r = await fetch(`/api/issues/${id}/image`, { method: "POST", headers: { "content-type": b.type || "application/octet-stream", "x-req": "1" }, body: b });
+  const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `오류 ${r.status}`);
+  return d;
 }
 function issueActivity(i) {
   const byUser = {};
@@ -918,13 +960,20 @@ async function issueBoard(i0, after) {
   const i = await api("GET", `/api/issues/${i0.id}`);
   const can = i.canManage;
   let changed = false, has = i.has_image, at = i.image_at;
-  const areas = {};
-  const dirty = () => IBOX.some(([k]) => areas[k].value !== (i[k] || ""));
+  const areas = {}, items = {};   // areas = 칸의 이전 기록(예전 4칸 글) · items = 템플릿 항목
+  i.items = i.items || {};
+  const dirty = () => IBOX.some(([k]) => areas[k] && areas[k].value !== (i[k] || "")) || Object.entries(items).some(([c, ta]) => ta.value !== (i.items[c] || ""));
+  const tas = [];
+  const mkTa = (v, ph) => { const ta = h("textarea", { readOnly: !can, placeholder: can ? ph : "", spellcheck: "false", rows: 1 }, v || ""); ta.addEventListener("input", () => grow(ta)); tas.push(ta); return ta; };
   const boxes = IBOX.map(([k, t, ask, cls, ic], n) => {
-    const ta = h("textarea", { readOnly: !can, placeholder: can ? ask : "", spellcheck: "false" }, i[k] || ""); areas[k] = ta;
     const mt = i.box_meta?.[k];
+    const rows = tplItems(k).map(it => { const ta = mkTa(i.items[it.code], it.hint || (can ? "내용을 입력하세요" : "")); items[it.code] = ta;
+      return h("div", { class: "iitem" + (i.items[it.code] ? " has" : "") }, h("label", { class: "iitem-lb" }, h("span", { class: "iitem-no" }, it.code + "."), " ", it.label), ta); });
+    let old = "";
+    if (i[k]) { const ta = mkTa(i[k], ""); areas[k] = ta;   // 예전 4칸 글: 항목으로 옮겨 적고 비우면 사라짐
+      old = h("div", { class: "iitem old" }, h("label", { class: "iitem-lb" }, "이전 기록", h("span", { class: "muted small", style: "font-weight:400" }, can ? " · 위 항목으로 옮겨 적은 뒤 비우고 저장하면 사라집니다" : "")), ta); }
     return h("section", { class: "ibox " + cls }, h("div", { class: "ibox-hd" }, h("span", { class: "ibox-no" }, n + 1), h("span", { class: "ibox-ic", html: ic }), h("b", {}, t), h("span", { class: "ibox-q" }, ask), h("div", { class: "spacer" }),
-      mt?.at ? h("span", { class: "ibox-at", title: `마지막 수정 ${mt.at} · ${mt.by}` }, `${Number(mt.at.slice(5, 7))}/${Number(mt.at.slice(8, 10))} ${String(mt.by).split(" ")[0]}`) : ""), ta);
+      mt?.at ? h("span", { class: "ibox-at", title: `마지막 수정 ${mt.at} · ${mt.by}` }, `${Number(mt.at.slice(5, 7))}/${Number(mt.at.slice(8, 10))} ${String(mt.by).split(" ")[0]}`) : ""), h("div", { class: "ibox-body" }, ...rows, old));
   });
   const kv = (k, v) => h("div", { class: "ikv" }, h("span", {}, k), h("div", {}, v));
   const file = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", hidden: true });
@@ -934,9 +983,7 @@ async function issueBoard(i0, after) {
     if (!f || !String(f.type).startsWith("image/")) return toast("이미지 파일(PNG · JPG · WEBP · GIF)만 올릴 수 있습니다", true);
     if (has && !(await confirmBox("이미 있는 이미지를 새 이미지로 바꿉니다.\n이전 이미지는 지워지고 되돌릴 수 없습니다."))) return;
     try {
-      const b = await shrinkImage(f);
-      const r = await fetch(`/api/issues/${i.id}/image`, { method: "POST", headers: { "content-type": b.type || "application/octet-stream", "x-req": "1" }, body: b });
-      const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `오류 ${r.status}`);
+      const d = await putImage(i.id, f);
       has = true; at = d.image_at; changed = true; drawImg(); toast("이미지를 올렸습니다");
     } catch (e) { toast(e.message, true); }
   };
@@ -960,21 +1007,32 @@ async function issueBoard(i0, after) {
       h("button", { class: "btn sm", onclick: () => modal(`${i.no} 담당별 투입 · 한 일 (${fmtH(i.hours.reduce((a, x) => a + x.h, 0))}h)`, issueActivity(i), []) }, "담당별 투입 · 한 일")));
   const body = h("div", { class: "iboard" }, side, h("div", { class: "ibox-grid" }, boxes));
   const top = () => { const all = document.querySelectorAll(".modal-bg"); return all.length && all[all.length - 1].contains(body); };
-  const onPaste = e => { if (!top() || !can) return; const f = [...(e.clipboardData?.files || [])].find(x => x.type.startsWith("image/")); if (!f) return; e.preventDefault(); upload(f); };
+  const onPaste = e => { if (!top() || !can) return; const f = clipImage(e.clipboardData); if (f) { e.preventDefault(); upload(f); } else if (!editableTarget(e)) toast(NO_IMG, true); };
   document.addEventListener("paste", onPaste);
   const btns = can ? [{ text: "저장", cls: "pri", fn: async () => {
-    const b = {}; for (const [k] of IBOX) if (areas[k].value !== (i[k] || "")) b[k] = areas[k].value;
-    if (Object.keys(b).length) { await api("PUT", `/api/issues/${i.id}`, b); for (const k in b) i[k] = b[k]; changed = true; toast("저장했습니다"); }
+    const b = {}, its = {};
+    for (const [k] of IBOX) if (areas[k] && areas[k].value !== (i[k] || "")) b[k] = areas[k].value;
+    for (const [c, ta] of Object.entries(items)) if (ta.value !== (i.items[c] || "")) its[c] = ta.value;
+    if (Object.keys(its).length) b.items = its;
+    if (Object.keys(b).length) { const r = await api("PUT", `/api/issues/${i.id}`, b); for (const k in b) if (k !== "items") i[k] = b[k]; i.items = r.items || i.items; changed = true; toast("저장했습니다"); }
   } }] : [];
   const close = modal([h("b", { class: "ino" }, i.no), h("span", {}, i.title), badge(i.sched.cls, i.sched.text), i.hidden ? badge("warn", "삭제됨") : "", h("span", { class: "muted small", style: "font-weight:400" }, can ? "진행 현황은 PL · 팀장 · 마스터가 씁니다" : "보기 전용")], body, btns,
-    { cls: "wide", noBgClose: can, beforeClose: async () => !dirty() || confirmBox("저장하지 않은 내용이 있습니다.\n저장하지 않고 닫을까요?"), onClose: () => { document.removeEventListener("paste", onPaste); if (changed) Promise.resolve(after?.()).catch(() => {}); } });
-  // 끌어다 놓기 (창 어디든)
+    { cls: "wide board", noBgClose: can, beforeClose: async () => !dirty() || confirmBox("저장하지 않은 내용이 있습니다.\n저장하지 않고 닫을까요?"), onClose: () => { document.removeEventListener("paste", onPaste); if (changed) Promise.resolve(after?.()).catch(() => {}); } });
+  // 0.7.2: 창 크기 — 처음엔 화면에 맞게 크게, 오른쪽 아래 모서리로 조절, 조절한 크기는 사람별로 기억
   const box = body.closest(".modal");
+  const sz = getPref("boardSize", null);
+  if (sz?.w && sz?.h) { box.style.width = Math.min(sz.w, innerWidth - 16) + "px"; box.style.height = Math.min(sz.h, innerHeight - 16) + "px"; }
+  requestAnimationFrame(() => tas.forEach(grow));
+  let szT = 0, first = true;
+  new ResizeObserver(() => { if (first) { first = false; return; } clearTimeout(szT); szT = setTimeout(() => { if (box.isConnected && box.style.width) setPref("boardSize", { w: Math.round(box.offsetWidth), h: Math.round(box.offsetHeight) }); }, 400); }).observe(box);
+  box.addEventListener("mouseup", () => { if (!box.style.width && (box.offsetWidth !== box.__w0 || box.offsetHeight !== box.__h0)) setPref("boardSize", { w: box.offsetWidth, h: box.offsetHeight }); });
+  requestAnimationFrame(() => { box.__w0 = box.offsetWidth; box.__h0 = box.offsetHeight; });
+  // 끌어다 놓기 (창 어디든)
   let dragN = 0;
   box.addEventListener("dragenter", e => { if (!can || !e.dataTransfer?.types?.includes("Files")) return; e.preventDefault(); dragN++; imgBox.classList.add("drag"); });
   box.addEventListener("dragover", e => { if (can && e.dataTransfer?.types?.includes("Files")) e.preventDefault(); });
   box.addEventListener("dragleave", () => { dragN = Math.max(0, dragN - 1); if (!dragN) imgBox.classList.remove("drag"); });
-  box.addEventListener("drop", e => { if (!can) return; e.preventDefault(); dragN = 0; imgBox.classList.remove("drag"); const f = [...(e.dataTransfer?.files || [])].find(x => x.type.startsWith("image/")); if (f) upload(f); else toast("이미지 파일만 올릴 수 있습니다", true); });
+  box.addEventListener("drop", e => { if (!can) return; e.preventDefault(); dragN = 0; imgBox.classList.remove("drag"); const f = clipImage(e.dataTransfer); if (f) upload(f); else toast("이미지 파일만 올릴 수 있습니다", true); });
 }
 function issueModal(i0, after) { return i0 ? issueBoard(i0, after) : issueForm(null, after); }
 // 새 이슈 등록 · 이슈 정보(모델 · 이슈명 · 일정 · 단계 · 담당 · 지연 사유) 고치기
@@ -999,14 +1057,29 @@ async function issueForm(i0, after) {
     const cat = sel([["", "업무 분류"], ...M.categories.map(c => [c.name, c.name])], m.category, { disabled: !can, class: "inp" });
     return { role, s, duty, cat, el: h("div", { class: "mem" }, h("b", {}, role), s, duty, cat) };
   });
+  // 0.7.2: 등록 · 수정 창에서도 이미지 (붙여넣기 Ctrl+V · 끌어다 놓기 · 파일 고르기) — 저장할 때 같이 올라감
+  let pend = null, pendUrl = "";
+  const imgArea = h("div", { class: "iimg form-img" });
+  const pick = h("input", { type: "file", accept: "image/*", hidden: true });
+  pick.addEventListener("change", () => { const f = pick.files[0]; pick.value = ""; if (f) setPend(f); });
+  const drawImg = () => imgArea.replaceChildren(pick, ...[].concat(
+    pend ? [h("img", { class: "iimg-th", src: pendUrl, alt: "새 첨부 이미지" }), h("div", { class: "row", style: "margin-top:4px" }, h("span", { class: "small" }, i.has_image ? "저장하면 이 이미지로 바뀝니다" : "저장하면 같이 올라갑니다"), h("div", { class: "spacer" }), h("button", { class: "btn sm", onclick: () => setPend(null) }, "빼기"))]
+      : !isNew && i.has_image ? [h("img", { class: "iimg-th", src: imgUrl(i), alt: "첨부 이미지", onclick: () => imageView(i) }), h("div", { class: "muted small", style: "margin-top:4px" }, "새 이미지를 Ctrl + V · 끌어다 놓기 · ", h("button", { class: "link2", onclick: () => pick.click() }, "파일 고르기"), " 하면 바뀝니다")]
+      : h("div", { class: "iimg-drop", onclick: () => pick.click() }, h("div", {}, "이미지를 여기에 끌어다 놓거나 ", h("b", {}, "Ctrl + V"), " 로 붙여넣기"), h("div", { class: "muted small" }, "눌러서 파일 고르기 · 이슈당 한 장"))));
+  function setPend(f) { if (pendUrl) URL.revokeObjectURL(pendUrl); pend = f; pendUrl = f ? URL.createObjectURL(f) : ""; drawImg(); if (f) toast("이미지를 넣었습니다 · 저장하면 올라갑니다"); }
+  drawImg();
   const form = h("div", { class: "form" }, ...field("번호", h("b", {}, i.no || "(저장하면 자동)")), ...field("모델", model), ...field("이슈명", title), ...field("발생처", source), ...field("발생일", occ), ...field("Target", tgt),
     ...field("단계 (PL)", stage), ...field("중요도", imp),
     h("label", { class: "full" }, "담당 · 할 일 (PL이 지정 → 각 담당자의 '내 이슈'에 할 일이 보임)"), h("div", { class: "full" }, memRows.map(r => r.el)),
     ...field("지연 사유" + (i.sched?.cls === "late" ? " ⚠" : ""), delay), ...field("비고", note),
     i.plAssigned?.length ? h("div", { class: "full help warn" }, `PL(${i.plAssigned.join(", ")})이 담당으로 되어 있습니다. 재지정이 필요한지 확인해 주세요.`) : "",
-    h("div", { class: "full small muted" }, isNew ? "진행 현황 4칸(현상 · 원인 분석 · 개선검토 · 검증 및 적용)과 첨부 이미지는 등록한 뒤 이슈를 눌러 씁니다." : "진행 현황 4칸과 첨부 이미지는 이슈를 누르면 열리는 창에서 고칩니다."));
+    can ? h("label", { class: "full" }, "첨부 이미지") : "", can ? h("div", { class: "full" }, imgArea) : "",
+    h("div", { class: "full small muted" }, isNew ? "진행 현황 4칸(현상 진단 · 원인 규명 · 대책 수립 · 검증 적용)은 등록한 뒤 이슈를 눌러 씁니다." : "진행 현황 4칸은 이슈를 누르면 열리는 창에서 고칩니다."));
   const body = form;
   const btns = [];
+  const top = () => { const all = document.querySelectorAll(".modal-bg"); return all.length && all[all.length - 1].contains(form); };
+  const onPaste = e => { if (!top() || !can) return; const f = clipImage(e.clipboardData); if (f) { e.preventDefault(); setPend(f); } else if (!editableTarget(e)) toast(NO_IMG, true); };
+  if (can) document.addEventListener("paste", onPaste);
   if (can) btns.push({ text: "저장", cls: "pri", fn: async () => {
     const members = memRows.map(r => ({ role: r.role, user_id: r.s.value ? Number(r.s.value) : null, duty: r.duty.value, category: r.cat.value })).filter(x => x.user_id);
     const pls = members.filter(x => isPLUser(x.user_id));
@@ -1017,8 +1090,11 @@ async function issueForm(i0, after) {
       confirm_pl = true;
     }
     const b = { model_id: Number(model.value) || null, title: title.value, source: source.value, occurred: occ.value, target: tgt.value, stage: Number(stage.value), delay_reason: delay.value, note: note.value, importance: imp.value, members, confirm_pl };
-    if (isNew) { const r = await api("POST", "/api/issues", b); toast(`${r.no} 등록했습니다`); }
-    else { await api("PUT", `/api/issues/${i.id}`, b); toast("저장했습니다"); }
+    let id = i.id, msg;
+    if (isNew) { const r = await api("POST", "/api/issues", b); id = r.id; msg = `${r.no} 등록했습니다`; }
+    else { await api("PUT", `/api/issues/${i.id}`, b); msg = "저장했습니다"; }
+    if (pend) { try { await putImage(id, pend); msg += " (이미지 포함)"; } catch (e) { toast(`${msg} · 이미지는 못 올렸습니다: ${e.message}`, true); await after(); return; } }
+    toast(msg);
     await after();
   } });
   if (can && !isNew) btns.unshift(i.hidden
@@ -1026,7 +1102,11 @@ async function issueForm(i0, after) {
     : { text: "삭제 (숨김)", cls: "danger", fn: async () => {
       const reason = await promptBox("삭제 사유", "예: 중복 등록, 잘못 만든 이슈"); if (!reason) return false;
       await api("POST", `/api/issues/${i.id}/hide`, { hidden: true, reason }); toast("숨겼습니다 (기록과 시간은 남음)"); await after(); } });
-  modal(isNew ? "새 이슈 등록" : `${i.no} 정보 · 담당 고치기`, body, btns);
+  modal(isNew ? "새 이슈 등록" : `${i.no} 정보 · 담당 고치기`, body, btns, { onClose: () => { document.removeEventListener("paste", onPaste); if (pendUrl) URL.revokeObjectURL(pendUrl); } });
+  // 끌어다 놓기
+  if (can) { imgArea.addEventListener("dragover", e => { if (e.dataTransfer?.types?.includes("Files")) { e.preventDefault(); imgArea.classList.add("drag"); } });
+    imgArea.addEventListener("dragleave", () => imgArea.classList.remove("drag"));
+    imgArea.addEventListener("drop", e => { e.preventDefault(); imgArea.classList.remove("drag"); const f = clipImage(e.dataTransfer); if (f) setPend(f); else toast("이미지 파일만 올릴 수 있습니다", true); }); }
 }
 function promptBox(title, ph) {
   return new Promise(res => { const inp = h("input", { class: "inp", placeholder: ph }); let ok = false;
@@ -1119,18 +1199,21 @@ async function pageRequests() {
 
 // ── 업무 지정 (PL → 팀원 통상 업무) ──
 async function pageAssign() {
-  const list = await api("GET", "/api/assign");
+  const [list, given] = await Promise.all([api("GET", "/api/assign"), M.perms.pl ? api("GET", "/api/assign/given").catch(() => []) : []]);
+  // 0.7.2: PL도 다른 파트 사람에게 지정 가능 (받는 사람 파트의 PL에게 🔔 알림) — 내 파트를 먼저 보여 줌
   const part = M.perms.admin ? "" : M.perms.plPart;
-  const people = M.users.filter(u => u.active && !u.gone && u.role !== "lead" && (!part || u.part === part));
+  const pOrd = p => (part && p === part ? -1 : M.parts.indexOf(p) < 0 ? 99 : M.parts.indexOf(p));
+  const people = M.users.filter(u => u.active && !u.gone && u.role !== "lead").sort((a, b) => pOrd(a.part) - pOrd(b.part));
   const title = h("input", { class: "inp", placeholder: "업무명 (예: B모델 EMC 대책 회로 검토)" });
-  const model = searchSel([["", "공통 (모델 없음)"], ...modelsFor(part).map(m => [m.id, `${m.name} (${m.part} · ${m.phase || "-"})`])], "");
+  const model = searchSel([["", "공통 (모델 없음)"], ...modelsFor("").map(m => [m.id, `${m.name} (${m.part} · ${m.phase || "-"})`])], "");
   const st = dateInput(M.today), tg = dateInput("");
   const imp = sel(["", "상", "중", "하"], "", { class: "inp" }), cat = searchSel([["", "-"], ...M.categories.map(c => [c.name, c.name])], "");
   const summary = h("input", { class: "inp", maxLength: 200, placeholder: "간략한 요약 (받는 사람 팝업에 업무명 · 목표일과 함께 보임)" });
   const note = h("textarea", { class: "inp", rows: 3, placeholder: "할 일 · 참고 내용 (받는 사람 업무의 비고에 들어감)" });
   const checks = people.map(u => ({ u, el: h("input", { type: "checkbox" }) }));
   const form = h("div", { class: "card" }, h("div", { class: "form" }, ...field("업무명", title), ...field("요약", summary), ...field("모델", model), ...field("시작일", st), ...field("목표 마감일", tg), ...field("중요도", imp), ...field("업무 분류", cat), ...field("할 일 · 비고", note),
-    ...field("받는 사람", h("div", { class: "picks" }, checks.map(c => h("label", { class: "pick" }, c.el, " ", c.u.name, part ? "" : h("small", { class: "muted" }, ` ${c.u.part}`)))))),
+    ...field("받는 사람", h("div", {}, [...new Set(people.map(u => u.part))].map(pt => h("div", { class: "pick-grp" }, h("span", { class: "pick-pt" }, pt || "파트 없음", part && pt !== part ? h("small", { class: "muted" }, " · 다른 파트 (그 파트 PL에게 알림)") : ""),
+      h("div", { class: "picks" }, checks.filter(c => c.u.part === pt).map(c => h("label", { class: "pick" }, c.el, " ", c.u.name)))))))),
     h("div", { class: "row", style: "margin-top:12px" }, h("button", { class: "btn pri", onclick: async () => {
       const ids = checks.filter(c => c.el.checked).map(c => c.u.id);
       try { const r = await api("POST", "/api/assign", { user_ids: ids, title: title.value, model_id: Number(model.value) || null, start: st.value, target: tg.value, importance: imp.value, category: cat.value, note: note.value, summary: summary.value });
@@ -1145,8 +1228,11 @@ async function pageAssign() {
     h("table", { style: "margin-top:8px" }, h("tbody", {}, g.map(t => h("tr", { class: "click", onclick: () => taskModal(t, false, pageAssign) }, h("td", { style: "width:140px" }, nameTag(t.uname)), h("td", { style: "width:110px" }, h("div", { class: "row" }, (t.progress ?? 0) + "%", h("div", { class: "bar" }, h("i", { style: `width:${t.progress || 0}%` })))),
       h("td", { style: "width:110px" }, badge(t.sched.cls, t.sched.text)), h("td", { class: "num", style: "width:80px" }, fmtH(t.total) + "h"), h("td", { class: "small muted" }, t.hidden ? "받은 사람이 삭제함" : t.notes ? `기록 ${t.notes}건` : ""))))));
   const openG = gl.filter(g => !g.every(fin)), doneG = gl.filter(g => g.every(fin));
-  app().replaceChildren(h("h1", {}, "업무 지정", h("span", { class: "sub" }, part ? `${part} 사람에게 통상 업무를 내려줍니다` : "모든 사람에게 통상 업무를 내려줍니다")),
-    foldable("assign-form", "새 업무 지정", form, true),
+  const givenBox = M.perms.pl ? [h("h2", {}, "내가 일을 준 사람", h("span", { class: "sub" }, "진행 중인 지정 업무가 있거나, 우리 파트 진행 이슈의 담당인 사람 · 누르면 그 사람의 '내 업무'를 읽기 전용으로 봅니다")),
+    given.length ? h("div", { class: "given" }, given.map(u => h("a", { class: "card person", href: `#/people/${u.id}` }, h("b", {}, u.name), h("div", { class: "muted small" }, [u.part, u.tasks ? `지정 업무 ${u.tasks}` : "", u.issues ? `이슈 ${u.issues}` : ""].filter(Boolean).join(" · ")))))
+      : h("div", { class: "card muted" }, "지금 일을 주고 있는 사람이 없습니다.")] : [];
+  app().replaceChildren(h("h1", {}, "업무 지정", h("span", { class: "sub" }, "통상 업무를 내려줍니다" + (part ? ` · 다른 파트 사람에게 주면 그 파트 PL에게 알림이 갑니다` : ""))),
+    foldable("assign-form", "새 업무 지정", form, true), ...givenBox,
     h("h2", {}, "내가 지정한 업무", h("span", { class: "sub" }, `진행 ${openG.length} · 완료 ${doneG.length} · 사람을 누르면 그 업무 보기 · 고치기`)),
     ...(openG.length ? openG.map(card) : [h("div", { class: "card muted" }, "진행 중인 지정 업무가 없습니다.")]),
     doneG.length ? foldable("assign-done", `완료된 지정 업무 (${doneG.length})`, doneG.map(card), false) : "");

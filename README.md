@@ -47,6 +47,7 @@ deploy/       도커 compose 예시
 ```bash
 cd app && bun install && cd ..
 python3 tools/mk_guide.py                 # 안내 그림 → app/src/guide_img.ts
+python3 tools/mk_fonts.py                 # 글꼴 Noto Sans KR → app/src/fonts_kr.ts
 mkdir -p run && cp sample/seed.json run/
 cd app && bun build --compile src/server.ts --outfile ../run/workmgmt && cd ../run
 ./workmgmt --port 8000                    # http://localhost:8000

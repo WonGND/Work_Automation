@@ -6,7 +6,7 @@
   --violet:#e9e2f6; --teal:#d7efef; --lead:#eaf1fb;
 }
 *{box-sizing:border-box}
-body{margin:0;font-family:"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo",system-ui,sans-serif;font-size:14px;color:var(--ink);background:var(--bg)}
+body{margin:0;font-family:"Noto Sans KR Variable","Noto Sans KR","Malgun Gothic","맑은 고딕","Apple SD Gothic Neo",system-ui,sans-serif;font-size:14px;color:var(--ink);background:var(--bg)}
 button,input,select,textarea{font:inherit;color:inherit}
 header{display:flex;align-items:center;gap:18px;background:var(--navy);color:#fff;padding:0 18px;height:52px;position:sticky;top:0;z-index:20}
 .brand{font-weight:700;font-size:16px;white-space:nowrap}
@@ -599,3 +599,60 @@ html[data-dark="1"] .card.notice.draft{background:#262213}
 /* ── 0.7.1 ── */
 .caps-tip{margin:4px 0 8px;font-size:12.5px;font-weight:600;color:#b42318;background:#fef3f2;border:1px solid #fecdca;border-radius:6px;padding:3px 8px;width:max-content;max-width:100%}
 html[data-dark="1"] .caps-tip{color:#ffb4a9;background:#3a1714;border-color:#6b2a24}
+/* ── 0.7.2 ── */
+/* 이슈 정리 · 우리 파트 이슈: 맨 위 카드 (누르면 그 조건만) */
+.icards{margin-bottom:10px}
+button.card.stat{font:inherit;text-align:left;cursor:pointer;color:inherit;transition:border-color .12s,box-shadow .12s}
+button.card.stat:hover{border-color:var(--navy2)}
+button.card.stat.on{border-color:var(--navy2);box-shadow:inset 0 0 0 2px var(--navy2)}
+.row.filt{margin:0 0 8px;gap:8px}
+.chk.dim{opacity:.45}
+/* 이슈 표: 글자 크기 한 가지 · 완료 이슈는 회색 */
+table.issues td,table.issues th{font-size:13px}
+table.issues td.no{font-weight:700}
+table.issues .sub2{font-size:12px;color:var(--muted);margin-top:1px}
+table.issues tr.is-done td{color:#8a93a3;background:#f3f4f7}
+table.issues tr.is-done:hover td{background:#eceef3}
+table.issues tr.is-done .name-tag,table.issues tr.is-done .badge.now{opacity:.7}
+html[data-dark="1"] table.issues tr.is-done td{color:#6f7a8b;background:#1b1f27}
+html[data-dark="1"] table.issues tr.is-done:hover td{background:#222733}
+/* 진행 현황 4칸: 템플릿 항목 */
+.ibox-body{flex:1;overflow:auto;padding:4px 0 6px;background:var(--card)}
+.iitem{padding:6px 12px 4px;border-bottom:1px dashed var(--line)}
+.iitem:last-child{border-bottom:0}
+.iitem-lb{display:block;font-size:13px;font-weight:600;color:var(--bx-ink);margin-bottom:2px}
+.iitem-no{color:var(--bx);font-weight:700}
+.ibox .iitem textarea{display:block;flex:none;min-height:34px;padding:6px 8px;border:1px solid transparent;border-radius:6px;background:var(--input);font-size:14px;line-height:1.55;overflow:hidden}
+.ibox .iitem textarea:hover:not([readonly]){border-color:var(--input-line)}
+.ibox .iitem textarea:focus{border-color:var(--bx);box-shadow:none;background:var(--card)}
+.ibox .iitem textarea[readonly]{background:transparent;padding-left:2px}
+.iitem.old{background:#fffbea}
+.iitem.old .iitem-lb{color:#7a5a00}
+.ibox .iitem.old textarea{background:#fff6d6}
+html[data-dark="1"] .iitem-lb{color:var(--ink)}
+html[data-dark="1"] .iitem.old{background:#2a2614}
+html[data-dark="1"] .iitem.old .iitem-lb{color:#e2c46a}
+html[data-dark="1"] .ibox .iitem.old textarea{background:#332e18}
+/* 읽기용 (내 이슈 카드) */
+.iline{padding:3px 0}
+.iline+.iline{border-top:1px dashed var(--line)}
+.iline b{font-size:12px;color:var(--muted);font-weight:600}
+.iline.old b{color:#9a7400}
+/* 이슈 창: 크게 열고, 모서리를 끌어 크기 조절 (사람마다 크기 기억) */
+.modal.wide.board{width:96vw;height:90vh;max-width:none;min-width:640px;min-height:420px;resize:both;overflow:hidden;display:flex;flex-direction:column}
+.modal-bg:has(.modal.board){padding:12px}
+.modal.wide.board .hd,.modal.wide.board .ft{flex:none}
+.modal.wide.board .bd{flex:1;min-height:0;max-height:none;overflow:auto}
+.modal.wide.board .ibox-grid{grid-auto-rows:minmax(260px,auto)}
+/* 등록 · 수정 창 이미지 칸 */
+.form-img .iimg-th{max-height:180px}
+.form-img.drag{outline:3px solid var(--navy2);outline-offset:3px}
+/* 업무 지정: 파트별 받는 사람 · 내가 일을 준 사람 */
+.pick-grp{display:flex;gap:10px;align-items:flex-start;padding:4px 0;border-bottom:1px dashed var(--line)}
+.pick-grp:last-child{border-bottom:0}
+.pick-pt{min-width:90px;font-weight:600;font-size:13px;padding-top:2px}
+.pick-pt small{display:block;font-weight:400}
+.given{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:6px}
+/* 시간표 하루 합계: 연차 · 반차 · 조퇴 표시 (월 보기에서도 보임) */
+.week thead tr.sum td .lvtag{font-size:11px;font-weight:600;color:#6a4fb0;line-height:1.2;white-space:nowrap}
+html[data-dark="1"] .week thead tr.sum td .lvtag{color:#c9b6f2}

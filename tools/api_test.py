@@ -172,7 +172,7 @@ check("남의 업무 상세 못 봄", m3.req("GET", f"/api/tasks/{t0['id']}")[0]
 # PL 업무 지정
 st, d = pl2.req("POST", "/api/assign", {"user_ids": [uid["정시우"], uid["조주원"]], "title": "API 지정 업무", "target": "2026-11-20", "note": "EMC 대책 검토"})
 check("PL이 우리 파트 2명에게 업무 지정", st == 200 and len(d["to"]) == 2, d)
-check("다른 파트 사람에게는 지정 못 함", pl2.req("POST", "/api/assign", {"user_ids": [uid["임서연"]], "title": "x"})[0] == 403)
+check("0.7.2: 다른 파트 사람에게도 지정 가능", pl2.req("POST", "/api/assign", {"user_ids": [uid["임서연"]], "title": "x"})[0] == 200)
 check("팀원은 지정 못 함", mem.req("POST", "/api/assign", {"user_ids": [uid["조주원"]], "title": "x"})[0] == 403)
 at = next(t for t in mem.req("GET", "/api/tasks")[1] if t["title"] == "API 지정 업무")
 check("받은 사람 업무에 'PL 지정'으로 생김", at["assigned_name"] == "최예준 수석" and at["kind"] == "통상" and at["target"] == "2026-11-20", at)

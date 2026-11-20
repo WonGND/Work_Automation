@@ -5,11 +5,14 @@
     "": {
       "name": "workload-web",
       "dependencies": {
+        "@fontsource-variable/noto-sans-kr": "5.3.1",
         "nodemailer": "6.9.16",
       },
     },
   },
   "packages": {
+    "@fontsource-variable/noto-sans-kr": ["@fontsource-variable/noto-sans-kr@5.3.1", "", {}, "sha512-f5aty6Qgk2LVU5TjCtXHxiYHqUWYW8f75ll0Chn8ucCqoOlIomcACUwf1V47yUt6wTdWZiGr3dcbQk+zlOspMA=="],
+
     "nodemailer": ["nodemailer@6.9.16", "", {}, "sha512-psAuZdTIRN08HKVd/E8ObdV6NO7NTBY3KsC30F7M4H1OnmLCUNaS56FpYxyb26zWLSyYF9Ozch9KYHhHegsiOQ=="],
   }
 }

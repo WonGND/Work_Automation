@@ -121,6 +121,8 @@ function migrate() {
   addCol("issues", "image", "TEXT DEFAULT ''");
   addCol("issues", "image_at", "TEXT DEFAULT ''");
   addCol("models", "hidden", "INTEGER DEFAULT 0");
+  // 0.7.2: 이슈 4칸 템플릿 항목 (1-1 ~ 4-5) { "1-1": "글", ... } · 예전 4칸 글(status_text 등)은 '이전 기록'으로 그대로 둠
+  addCol("issues", "items", "TEXT DEFAULT '{}'");
   db.exec(`CREATE TABLE IF NOT EXISTS notifs (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT, text TEXT, link TEXT DEFAULT '', created TEXT DEFAULT (datetime('now','localtime')), read INTEGER DEFAULT 0);
     CREATE INDEX IF NOT EXISTS ix_notif_user ON notifs(user_id, read);
     CREATE TABLE IF NOT EXISTS pw_resets (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, code_hash TEXT, expires TEXT, tries INTEGER DEFAULT 0, used INTEGER DEFAULT 0, created TEXT DEFAULT (datetime('now','localtime')));`);   // 0.7.0: 가운데 팝업(pop · ack) · 공지 · 지정 업무 요약 · 새로 지정/바뀐 표시(빨간 점: 1 = 새 것, 2 = 탭은 봄, 0 = 봄)

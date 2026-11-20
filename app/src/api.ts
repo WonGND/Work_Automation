@@ -61,6 +61,7 @@ function meta(u: User) {
     reqPending: q1("SELECT COUNT(*) n FROM requests WHERE to_id=? AND status='대기' AND hidden_to=0", u.id)?.n || 0,
     dots: dotCount(u.id),
     prefs: Object.fromEntries(q("SELECT key,value FROM user_prefs WHERE user_id=?", u.id).map((r: any) => [r.key, r.value])),
+    issueTpl: TPL.map(([b, its], k) => ({ key: b, title: BOXES[k][1], items: its.map(([c, l, hint]) => ({ code: c, label: l, hint })) })),
     users, models: q("SELECT * FROM models ORDER BY ord,id"), parts: q("SELECT name FROM parts ORDER BY ord").map((p: any) => p.name),
     grades: q("SELECT * FROM grades ORDER BY ord"), categories: q("SELECT * FROM categories ORDER BY ord"),
     stages: JSON.parse(getSetting("stage_names", "[]")), stagePct: JSON.parse(getSetting("stage_pct", "[]")),
@@ -70,7 +71,14 @@ function meta(u: User) {
   };
 }
 
-function canSeeUser(u: User, uid: number) { return u.id === uid || isAdmin(u); }
+// 0.7.2: PL은 자기가 일을 준 사람(진행 중인 지정 업무가 있거나, 우리 파트 진행 중 이슈의 담당)의 업무를 볼 수 있음 (보기 전용)
+function gaveWork(u: User, uid: number) {
+  if (!isPL(u) || u.id === uid) return false;
+  return !!q1(`SELECT 1 FROM tasks WHERE user_id=? AND assigned_by=? AND hidden=0 AND done IS NULL AND IFNULL(progress,0)<100`, uid, u.id)
+    || !!q1(`SELECT 1 FROM issue_members im JOIN issues i ON i.id=im.issue_id JOIN models m ON m.id=i.model_id
+             WHERE im.user_id=? AND m.part=? AND i.hidden=0 AND i.done IS NULL AND IFNULL(i.stage,1)<6`, uid, u.part);
+}
+function canSeeUser(u: User, uid: number) { return u.id === uid || isAdmin(u) || gaveWork(u, uid); }
 function partOfModel(modelId: number | null) { return modelId ? (q1("SELECT part FROM models WHERE id=?", modelId)?.part || "") : ""; }
 function canManageIssue(u: User, iss: any) { return isAdmin(u) || (isPL(u) && partOfModel(iss.model_id) === u.part); }
 function membersOf(issueId: number) { return q("SELECT m.*, u.name FROM issue_members m JOIN users u ON u.id=m.user_id WHERE issue_id=? ORDER BY CASE m.role WHEN '정' THEN 0 WHEN '부1' THEN 1 ELSE 2 END", issueId); }
@@ -80,11 +88,30 @@ function dotCount(uid: number) {
 }
 function stageDone(i: any) { return !!i.done || i.stage === 6; }
 // 0.6.0: 진행 현황 4칸 (기존 칸을 그대로 씀: 현상 = 진행현황 · 원인 분석 = 원인 · 개선검토 = 대응 계획 · 검증 및 적용 = 새 칸)
-export const BOXES: [string, string][] = [["status_text", "현상"], ["cause", "원인 분석"], ["plan", "개선검토"], ["verify", "검증 및 적용"]];
+export const BOXES: [string, string][] = [["status_text", "현상 진단"], ["cause", "원인 규명"], ["plan", "대책 수립"], ["verify", "검증 적용"]];
+// 0.7.2: 4칸 템플릿 항목 [칸, [번호, 항목, 안내 글]] — 칸의 예전 글(status_text 등)은 '이전 기록'으로 남음
+export const TPL: [string, [string, string, string][]][] = [
+  ["status_text", [["1-1", "불량 증상", "불량현상, 발생처, 발생했던 조건 (시험조건 or field 등)"], ["1-2", "불량 재현", "불량발생 동일 조건에서 재현여부 확인 — SET or 단품, 불량 재현 조건"], ["1-3", "불량 발생 범위 및 영향도", ""]]],
+  ["cause", [["2-1", "원인 기인", "설계 or 원자재 or 공정 등 (Swap 평가 포함)"], ["2-2", "재현 검증", ""], ["2-3", "발생 원인", ""], ["2-4", "미검출 원인", ""]]],
+  ["plan", [["3-1", "원인별 개선안", ""], ["3-2", "개선안별 변경점", ""], ["3-3", "효과 · 비용 · 일정", ""], ["3-4", "Risk 사항", ""], ["3-5", "재발 방지 대책", ""], ["3-6", "개선안 선정", ""], ["3-7", "검증 계획 (기준, 일정)", ""]]],
+  ["verify", [["4-1", "시제품 제작", ""], ["4-2", "개선효과 검증", ""], ["4-3", "RISK 검증", ""], ["4-4", "고객사 또는 내부 4M 계획 (필요시)", ""], ["4-5", "기준서 또는 체크리스트 개정 (필요시)", ""]]],
+];
+const ITEM_BOX: Record<string, string> = Object.fromEntries(TPL.flatMap(([b, its]) => its.map(([c]) => [c, b])));
+const ITEM_LABEL: Record<string, string> = Object.fromEntries(TPL.flatMap(([, its]) => its.map(([c, l]) => [c, l])));
+function itemsOf(i: any): Record<string, string> { try { const o = JSON.parse(i.items || "{}"); return o && typeof o === "object" ? o : {}; } catch { return {}; } }
 const nowLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16).replace("T", " ");   // 서버 시간대(Asia/Seoul) 기준
 function boxMeta(i: any) { try { const o = JSON.parse(i.box_meta || "{}"); return o && typeof o === "object" ? o : {}; } catch { return {}; } }
 // 이슈 요약 '현재 진행' = 내용이 있는 가장 뒤 칸
-function nowBox(i: any) { for (let k = BOXES.length - 1; k >= 0; k--) { const t = str(i[BOXES[k][0]], 4000); if (t) return { key: BOXES[k][0], label: BOXES[k][1], text: t }; } return null; }
+// 이슈 정리 '현재 진행' = 내용이 있는 가장 뒤 칸 → 그 칸에서 가장 뒤의 채운 항목 (없으면 그 칸의 이전 기록)
+function nowBox(i: any) {
+  const it = itemsOf(i);
+  for (let k = TPL.length - 1; k >= 0; k--) {
+    const [bk, its] = TPL[k];
+    for (let j = its.length - 1; j >= 0; j--) { const t = str(it[its[j][0]], 4000); if (t) return { key: bk, label: `${its[j][0]} ${its[j][1]}`, box: BOXES[k][1], text: t }; }
+    const t = str(i[bk], 4000); if (t) return { key: bk, label: BOXES[k][1], box: BOXES[k][1], text: t, legacy: true };
+  }
+  return null;
+}
 const IMG_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
 function sniffImage(b: Uint8Array): string {
   if (b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "png";
@@ -103,7 +130,7 @@ function issueRow(i: any, c = ctx()) {
   const st = scheduleState(i.target, i.done, stageDone(i));
   const plUsers = new Set(q("SELECT id FROM users WHERE role='pl'").map((x: any) => x.id));
   const f = imgPath(i.image);
-  return { ...i, box_meta: boxMeta(i), now: nowBox(i), has_image: !!f && existsSync(f), model: m?.name || "", part: m?.part || "", members: mem, hours: tot, sched: st,
+  return { ...i, items: itemsOf(i), box_meta: boxMeta(i), now: nowBox(i), has_image: !!f && existsSync(f), model: m?.name || "", part: m?.part || "", members: mem, hours: tot, sched: st,
     progress: (c.stagePct[(i.stage || 1) - 1] ?? 0),
     needDelay: st.cls === "late" && !str(i.delay_reason),
     plAssigned: mem.filter((x: any) => plUsers.has(x.user_id)).map((x: any) => x.name) };
@@ -128,7 +155,7 @@ export function setupNeeded() { return !q1("SELECT 1 FROM users WHERE active=1 A
 // 업무를 고칠 수 있는 사람: 본인 · 마스터 · 그 업무를 지정해 준 PL
 function canEditTask(me: User, t: any) { return t.user_id === me.id || me.role === "master" || (t.assigned_by && t.assigned_by === me.id); }
 // PL이 업무를 지정할 수 있는 사람: 우리 파트 (팀장 · 마스터는 모두)
-function canAssignTo(me: User, u: any) { return u && u.active && !gone(u) && u.role !== "lead" && (isAdmin(me) || (isPL(me) && u.part === me.part)); }
+function canAssignTo(me: User, u: any) { return u && u.active && !gone(u) && u.role !== "lead" && (isAdmin(me) || isPL(me)); }   // 0.7.2: PL은 다른 파트 사람에게도 지정
 function checkTaskInput(b: any, isNew: boolean) {
   const out: any = {};
   if (isNew || "kind" in b) { if (!["통상", "기타", "휴가", "조퇴"].includes(b.kind)) err(400, "구분은 통상 · 기타 · 휴가 · 조퇴 중에서 고릅니다 (이슈는 PL이 등록)"); out.kind = b.kind; }
@@ -490,16 +517,26 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     db.transaction(() => {
       for (const id of ids) {
         const u = q1("SELECT * FROM users WHERE id=?", id);
-        if (!canAssignTo(me, u)) err(403, `${u?.name || id}: ${isPL(me) ? me.part + " 사람에게만" : ""} 지정할 수 있습니다`);
+        if (!canAssignTo(me, u)) err(403, `${u?.name || id}: 지정할 수 없는 사람입니다`);
         run(`INSERT INTO tasks(user_id,kind,model_id,title,progress,start,target,done,importance,category,note,ord,assigned_by,assign_group,summary,flag) VALUES(?,?,?,?,0,?,?,NULL,?,?,?,(SELECT IFNULL(MAX(ord),0)+1 FROM tasks WHERE user_id=?),?,?,?,?)`,
           id, "통상", v.model_id ?? null, v.title, v.start ?? null, v.target ?? null, v.importance ?? "", v.category ?? "", v.note ?? "", id, me.id, grp, summary, id !== me.id ? 1 : 0);
         made.push(u.name);
         if (id !== me.id) notify(id, "업무", `${me.name} 이(가) 업무를 지정했습니다: ${v.title}${v.target ? ` (목표 ${v.target})` : ""}`, "#/me",
           { pop: true, data: { what: "업무 지정", by: me.name, 제목: v.title, 요약: summary, 목표일: v.target || "", 모델: v.model_id ? q1("SELECT name FROM models WHERE id=?", v.model_id)?.name || "" : "" } });
+        // 0.7.2: 다른 파트 사람에게 지정하면 그 파트 PL에게도 알림 (🔔만)
+        if (isPL(me) && u.part && u.part !== me.part)
+          notify(q("SELECT id FROM users WHERE role='pl' AND part=? AND active=1 AND id<>?", u.part, u.id).map((x: any) => x.id), "업무", `${me.name}(${me.part} PL) 이(가) ${u.name} 에게 업무를 지정했습니다: ${v.title}${v.target ? ` (목표 ${v.target})` : ""}`, "");
       }
     })();
     audit(me.id, "업무 지정", v.title, { to: made, ...v });
     return json({ ok: true, to: made });
+  }
+  // 0.7.2: 내가 일을 준 사람 (PL: 업무를 볼 수 있는 사람 목록)
+  if (p === "/api/assign/given" && m === "GET") {
+    if (!isPL(me)) return json([]);
+    return json(q("SELECT id,name,part,title FROM users WHERE active=1 AND id<>? ORDER BY ord,id", me.id).filter((u: any) => gaveWork(me, u.id)).map((u: any) => ({
+      ...u, tasks: q1("SELECT COUNT(*) n FROM tasks WHERE user_id=? AND assigned_by=? AND hidden=0 AND done IS NULL AND IFNULL(progress,0)<100", u.id, me.id)?.n || 0,
+      issues: q1(`SELECT COUNT(*) n FROM issue_members im JOIN issues i ON i.id=im.issue_id JOIN models m ON m.id=i.model_id WHERE im.user_id=? AND m.part=? AND i.hidden=0 AND i.done IS NULL AND IFNULL(i.stage,1)<6`, u.id, me.part)?.n || 0 })));
   }
   if (p === "/api/assign" && m === "GET") {
     if (!isAdmin(me) && !isPL(me)) err(403, "볼 수 없습니다");
@@ -693,8 +730,10 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       no = nextIssueNo();
       const meta: any = {}; const stamp = { at: nowLocal(), by: me.name };
       for (const [k] of BOXES) if (str(body[k], 4000)) meta[k] = stamp;
-      const r = run(`INSERT INTO issues(no,model_id,title,source,occurred,target,stage,status_text,cause,plan,verify,box_meta,note,importance,created_by) VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?,?)`,
-        no, model_id, title, str(body.source, 20), dOrNull(body.occurred) || today(), dOrNull(body.target), str(body.status_text, 4000), str(body.cause, 4000), str(body.plan, 4000), str(body.verify, 4000), JSON.stringify(meta), str(body.note), str(body.importance, 5), me.id);
+      const its: Record<string, string> = {};   // 0.7.2: 템플릿 항목
+      if (body.items && typeof body.items === "object") for (const [c, v] of Object.entries(body.items)) { if (!ITEM_BOX[c]) err(400, `없는 항목입니다: ${c}`); const t = str(v, 4000); if (t) { its[c] = t; meta[ITEM_BOX[c]] = stamp; } }
+      const r = run(`INSERT INTO issues(no,model_id,title,source,occurred,target,stage,status_text,cause,plan,verify,box_meta,items,note,importance,created_by) VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?)`,
+        no, model_id, title, str(body.source, 20), dOrNull(body.occurred) || today(), dOrNull(body.target), str(body.status_text, 4000), str(body.cause, 4000), str(body.plan, 4000), str(body.verify, 4000), JSON.stringify(meta), JSON.stringify(its), str(body.note), str(body.importance, 5), me.id);
       id = Number(r.lastInsertRowid);
       setMembers(id, body.members || [], !!body.confirm_pl, me);
     })();
@@ -762,9 +801,22 @@ export async function handle(req: Request, url: URL): Promise<Response> {
         if (!manage) err(403, k === "delay_reason" ? "입력 권한이 없습니다 (지연 사유는 PL이 입력)" : `${NOPERM} (PL · 팀장만 고칠 수 있는 칸)`);
         set[k] = ["occurred", "target", "done"].includes(k) ? dOrNull(body[k]) : k === "model_id" ? (Number(body[k]) || null) : str(body[k], boxKeys.includes(k) ? 4000 : 2000);
       }
-      if (boxKeys.some(k => k in set)) {   // 칸별 마지막 수정 (언제 · 누가)
+      // 0.7.2: 템플릿 항목 { "1-1": "글", ... } — 보낸 항목만 바꿈 (안 보낸 항목은 그대로)
+      const touched = new Set<string>(boxKeys.filter(k => k in set));
+      if (body.items && typeof body.items === "object") {
+        const cur = itemsOf(iss); let ch = false;
+        for (const [c, v] of Object.entries(body.items)) {
+          if (!ITEM_BOX[c]) err(400, `없는 항목입니다: ${c}`);
+          const t = str(v, 4000); if ((cur[c] || "") === t) continue;
+          if (!manage) err(403, `${NOPERM} (PL · 팀장만 고칠 수 있는 칸)`);
+          if (t) cur[c] = t; else delete cur[c];
+          touched.add(ITEM_BOX[c]); ch = true;
+        }
+        if (ch) set.items = JSON.stringify(cur);
+      }
+      if (touched.size) {   // 칸별 마지막 수정 (언제 · 누가)
         const meta = boxMeta(iss); const stamp = { at: nowLocal(), by: me.name };
-        for (const k of boxKeys) if (k in set) meta[k] = stamp;
+        for (const k of touched) meta[k] = stamp;
         set.box_meta = JSON.stringify(meta);
       }
       if (set.model_id && isPL(me) && partOfModel(set.model_id) !== me.part) err(403, `${me.part} 모델만 고를 수 있습니다`);

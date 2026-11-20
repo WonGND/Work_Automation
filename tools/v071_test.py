@@ -97,6 +97,6 @@ rows = [x for x in week(mem)["rows"] if x["type"] == "task" and x["title"].start
 check("주간 표 완료 업무에 완료일", sorted(x["doneAt"] for x in rows) == ["2026-11-03", "2026-11-10", "2026-11-17"], [x.get("doneAt") for x in rows])
 tl = [t for t in mem.req("GET", "/api/tasks")[1] if t["title"].startswith("완료 정렬")]
 check("업무 목록에 완료일", all(t["done"] for t in tl))
-check("버전 0.7.1", urllib.request.urlopen(BASE + "/version").read().decode() == "업무관리 0.7.1")
+check("버전 0.7.1 이상", urllib.request.urlopen(BASE + "/version").read().decode() >= "업무관리 0.7.1")
 print(f"0.7.1 시험: 통과 {ok} · 실패 {bad}")
 sys.exit(1 if bad else 0)
