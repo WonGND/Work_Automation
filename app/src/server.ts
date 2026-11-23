@@ -21,7 +21,7 @@ import { GUIDE } from "./guide_img";
 import { FONT_CSS, FONTS } from "./fonts_kr";   // 0.7.2: Noto Sans KR (tools/mk_fonts.py 가 만듦)
 import { createHash } from "node:crypto";
 
-export const VERSION = "업무관리 0.7.3";
+export const VERSION = "업무관리 0.7.4";
 const args = process.argv.slice(2);
 const ENVK: Record<string, string> = { "--port": "WL_PORT", "--data": "WL_DATA", "--cert": "WL_TLS_CERT", "--key": "WL_TLS_KEY", "--http-port": "WL_HTTP_PORT", "--key-file": "WL_KEY_FILE", "--seed": "WL_SEED" };
 const arg = (k: string, d: string) => { const i = args.indexOf(k); if (i >= 0 && args[i + 1]) return args[i + 1]; const e = ENVK[k] && process.env[ENVK[k]]; return e || d; };
@@ -121,6 +121,7 @@ remind(); setInterval(remind, 10 * 60e3);
 const CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'";
 // 버전이 바뀌면 모든 사람에게 알림 (우상단 🔔)
 const NOTES: Record<string, string> = {
+  "업무관리 0.7.4": "PPT 내보내기: 항목 제목(1-1 등)과 그 내용의 글자 크기를 항상 1pt 차이로 (11.5/10.5 → 최소 9.5/8.5) · '-'처럼 기호만 적힌 항목 · 줄은 빠짐 (내보내기 창에도 '비어 있음') · 배포하지 않은 버전 공지 초안이 있으면 새 버전 내용을 그 초안 뒤에 이어 붙임 (고친 문구 유지)",
   "업무관리 0.7.3": "이슈 창 [PPT 내보내기]: 연구소 표준용지 한 장에 4칸 내용(+ 기본 정보 · 첨부 이미지 · 이전 기록)을 넣고 글자 수에 맞춰 배치 · 글자 크기를 바꿈 (최소 9pt, 그래도 넘치면 유첨 장), 넣을 항목을 고르고 사람마다 기억 · 기준정보 '이슈 템플릿' 탭(마스터 · 팀장): 4칸 제목 · 항목 이름 · 설명 · 순서를 고치고 항목 추가 · 지우기 · 살리기 (지운 항목에 써 둔 글은 '삭제된 항목'으로 남음) · 모든 창을 제목 줄로 끌어 옮김 · 이슈 등록 · 수정 창과 업무 창은 띄운 채로 뒤 목록을 보고 다른 이슈를 열 수 있음",
   "업무관리 0.7.2": "이슈 4칸 이름을 현상 진단 · 원인 규명 · 대책 수립 · 검증 적용으로, 칸 안을 템플릿 항목(1-1 불량 증상 … 4-5 기준서 개정)으로 나눔 (예전 글은 각 칸 '이전 기록'에 그대로) · 이슈 창 크게 열고 크기 조절 · 이슈 요약 탭을 이슈 정리 맨 위 카드로 (누르면 그 조건만) · 완료 이슈 회색 · PL이 일을 준 사람의 '내 업무' 읽기 전용 보기 · PL이 다른 파트 사람에게도 업무 지정 (그 파트 PL에게 알림) · 하루 합계는 일한 시간만, 아래에 연차 · 반차 · 조퇴 · 이슈 등록 · 수정 창에서도 이미지 붙여넣기 · 글꼴 Noto Sans KR",
   "업무관리 0.7.1": "완료된 업무 · 이슈는 최신 완료일이 위로 (시간 입력 표 '완료' 묶음 · 업무 목록 · 내 이슈) · PL은 담당이 아니어도 우리 파트 진행 중 이슈가 '내 업무' 시간 입력 표에 'PL 관리'로 보임 (시간 입력 가능 · 누르면 이슈 창에서 4칸 · 정보 수정) · PL만 '내 업무'에 '+ 이슈 등록' 버튼 · 비밀번호 칸에서 Caps Lock 이 켜져 있으면 안내",
@@ -147,6 +148,7 @@ const NOTICE: [string, string[]][] = [
   ["업무관리 0.7.1", ["완료된 업무 · 이슈는 최신 완료일이 위로", "PL은 우리 파트 이슈가 '내 업무'에 'PL 관리'로 보임 (시간 입력 · 누르면 수정), '+ 이슈 등록' 버튼", "비밀번호 입력 시 Caps Lock 안내"]],
   ["업무관리 0.7.2", ["이슈 4칸 이름 변경 (현상 진단 · 원인 규명 · 대책 수립 · 검증 적용), 칸 안에 템플릿 항목 — 예전 글은 '이전 기록'에 그대로", "이슈 창을 크게 열고 모서리를 끌어 크기 조절 (크기 기억)", "이슈 요약 탭 → 이슈 정리 맨 위 카드 (누르면 그 조건만 보기), 완료 이슈는 회색", "PL: 일을 준 사람의 '내 업무' 읽기 전용 보기, 다른 파트 사람에게도 업무 지정", "하루 합계는 일한 시간만 + 연차 · 반차 · 조퇴 표시", "이슈 등록 · 수정 창에서도 이미지 Ctrl+V", "글꼴 Noto Sans KR"]],
   ["업무관리 0.7.3", ["이슈 창 [PPT 내보내기] — 연구소 표준용지 한 장 (글이 많으면 글자를 줄이고, 그래도 넘치면 유첨 장)", "넣을 내용(기본 정보 · 이미지 · 칸 · 항목)을 고를 수 있고 고른 것은 기억", "기준정보 '이슈 템플릿' — 4칸 제목 · 항목을 마스터 · 팀장이 고침 (지운 항목의 글은 남음)", "모든 창을 제목 줄로 끌어 옮기기", "이슈 등록 · 수정 · 업무 창을 띄운 채로 뒤 목록 보기 · 다른 이슈 열어 보기"]],
+  ["업무관리 0.7.4", ["PPT 항목 제목과 내용 글자 크기를 1pt 차이로 맞춤", "'-'만 적힌 항목은 PPT에서 자동으로 빠짐"]],
 ];
 {
   const last = getSetting("last_version", "");
@@ -156,12 +158,15 @@ const NOTICE: [string, string[]][] = [
     const lines = news.flatMap(([, ls]) => ls);
     if (lines.length && q1("SELECT 1 FROM users WHERE active=1")) {
       const ver = VERSION.replace("업무관리 ", "");
-      for (const d of q("SELECT id FROM notices WHERE status='draft' AND kind='버전'")) run("DELETE FROM notices WHERE id=?", d.id);   // 배포하지 않은 예전 초안은 새 초안으로 바꿈
+      // 0.7.4: 배포하지 않은 예전 초안이 있으면 그 글(마스터가 고친 문구 포함) 뒤에 새 버전 내용을 이어 붙여 한 번에 공지
+      const olds = q("SELECT id, body FROM notices WHERE status='draft' AND kind='버전' ORDER BY id");
+      const body = [...olds.map((d: any) => String(d.body || "").trim()).filter(Boolean), lines.map(l => "· " + l).join("\n")].join("\n");
+      for (const d of olds) run("DELETE FROM notices WHERE id=?", d.id);
       run("UPDATE notifs SET ack=1 WHERE pop=1 AND ack=0 AND kind='버전' AND data LIKE '%draft_id%'");
-      const r = run("INSERT INTO notices(kind,title,body,status,version) VALUES('버전',?,?,'draft',?)", `업무관리 ${ver} 업데이트 안내`, lines.map(l => "· " + l).join("\n"), VERSION);
+      const r = run("INSERT INTO notices(kind,title,body,status,version) VALUES('버전',?,?,'draft',?)", `업무관리 ${ver} 업데이트 안내`, body, VERSION);
       const id = Number(r.lastInsertRowid);
       notify(q("SELECT id FROM users WHERE active=1 AND role='master'").map((x: any) => x.id), "버전", `${VERSION} 로 업데이트됐습니다 · 공지 초안을 확인하고 배포해 주세요`, "#/notices",
-        { pop: true, data: { what: "버전 공지 초안", 제목: `업무관리 ${ver} 업데이트 안내`, 본문: lines.map(l => "· " + l).join("\n"), 안내: "공지 메뉴에서 문구를 고쳐 [배포]하면 팀원에게 팝업으로 갑니다. 배포 전에는 마스터에게만 보입니다.", draft_id: id } });
+        { pop: true, data: { what: "버전 공지 초안", 제목: `업무관리 ${ver} 업데이트 안내`, 본문: body, 안내: "공지 메뉴에서 문구를 고쳐 [배포]하면 팀원에게 팝업으로 갑니다. 배포 전에는 마스터에게만 보입니다.", draft_id: id } });
     }
     setSetting("last_version", VERSION);
   }

@@ -39,17 +39,19 @@ type Para = { kind: "label" | "body" | "dash" | "note"; text: string; pt: number
 const IND = 0.4;   // " - " 내어쓰기
 // 이미 "-", "•", "1.", "(1)", "①" 등으로 시작하는 줄은 그대로 둔다
 const OWN = /^\s*([-•·*▶▷■□○●※→]|\(?\d{1,2}[).]|[①-⑳]|[가-하][.)])\s*/;
+// 0.7.4: "-" · "." 처럼 기호만 적힌 내용은 빈 것으로 봄 (항목 · 줄째 뺌)
+export const blank = (t: string) => !String(t ?? "").replace(/[-–—_·•.,~\s]/g, "");
 function boxParas(b: PptBox, lpt: number, bpt: number, width: number): Para[] {
   const out: Para[] = [];
   const add = (kind: Para["kind"], text: string, pt: number, w: number, extra = 0) => out.push({ kind, text, pt, h: wrapCount(text, pt, w) * lineH(pt) + extra, gap: extra > 0 });
   for (const it of b.items) {
-    if (!String(it.text || "").trim()) continue;                 // 빈 항목은 줄째 뺀다
+    if (blank(it.text)) continue;                                // 빈 항목("-"만 적은 것 포함)은 줄째 뺀다
     add("label", [it.code, it.label].filter(Boolean).join(" "), lpt, width, out.length ? 0.1 : 0);
-    for (const ln of String(it.text).replace(/\r/g, "").split("\n").filter(x => x.trim())) add("body", ln.trim(), bpt, width - IND);
+    for (const ln of String(it.text).replace(/\r/g, "").split("\n").filter(x => !blank(x))) add("body", ln.trim(), bpt, width - IND);
   }
-  if (b.old && b.old.trim()) {
+  if (b.old && !blank(b.old)) {
     add("label", "이전 기록", lpt, width, out.length ? 0.1 : 0);
-    for (const ln of b.old.replace(/\r/g, "").split("\n").filter(x => x.trim())) add("body", ln.trim(), bpt, width - IND);
+    for (const ln of b.old.replace(/\r/g, "").split("\n").filter(x => !blank(x))) add("body", ln.trim(), bpt, width - IND);
   }
   if (!out.length) add("dash", "-", bpt, width);                 // 칸 전체가 비면 "-"
   return out;
@@ -107,7 +109,8 @@ function sectionNeed(s: { paras: Para[]; table?: Table | null; img?: { w: number
 
 export function layoutIssue(iss: PptIssue): Layout {
   const sz = iss.image ? imgSize(iss.image.data) : null;
-  const SCALES = [[12, 10.5, 10], [11.5, 10, 9.5], [11, 9.5, 9], [10.5, 9, 9], [10, 9, 8.5], [9.5, 9, 8]];
+  // [항목 제목, 내용, 기본 정보 표] — 0.7.4: 제목과 내용은 항상 1pt 차이 (11.5/10.5 → 9.5/8.5)
+  const SCALES = [[11.5, 10.5, 10], [11, 10, 9.5], [10.5, 9.5, 9], [10, 9, 8.5], [9.5, 8.5, 8]];
   const DEF_WL = 14.0;
   const wLs = [DEF_WL]; for (let w = 9.5; w <= 15.001; w += 0.25) if (Math.abs(w - DEF_WL) > 0.01) wLs.push(+w.toFixed(2));
   wLs.sort((a, b) => Math.abs(a - DEF_WL) - Math.abs(b - DEF_WL));

@@ -54,7 +54,7 @@ def png(w, h):
     ch = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
     return b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + ch(b"IDAT", zlib.compress(rows)) + ch(b"IEND", b"")
 lead = login(lead_u["login"])
-check("버전 0.7.3", urllib.request.urlopen(BASE + "/version").read().decode() == "업무관리 0.7.3")
+check("버전 0.7.3 이상", urllib.request.urlopen(BASE + "/version").read().decode() >= "업무관리 0.7.3")
 tpl0 = adm.req("GET", "/api/meta")[1]["issueTpl"]
 check("기본 템플릿 id = 예전 번호", [i["id"] for i in tpl0[0]["items"]] == ["1-1", "1-2", "1-3"] and tpl0[0]["deleted"] == [])
 

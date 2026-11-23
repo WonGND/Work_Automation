@@ -986,7 +986,8 @@ function pptDialog(i) {
   const its = i.items || {};
   const boxes = IBOX.map(([k]) => {
     const head = ck(k, h("b", {}, boxTitle(k)));
-    const rows = tplItems(k).map(it => ck(it.id, `${it.code} ${it.label}`, its[it.id] ? "" : "(비어 있음)", !!its[it.id]));
+    const has = id => !!String(its[id] || "").replace(/[-–—_·•.,~\s]/g, "");   // "-"만 적은 것도 비어 있음 (PPT에서 빠짐)
+    const rows = tplItems(k).map(it => ck(it.id, `${it.code} ${it.label}`, has(it.id) ? "" : "(비어 있음)", has(it.id)));
     for (const d of tplDeleted(k)) if (its[d.id]) rows.push(ck(d.id, `삭제된 항목 · ${d.label}`, ""));
     const sub = h("div", { class: "ppt-items" }, rows);
     const hc = head.querySelector("input"); const sync = () => sub.classList.toggle("off", !hc.checked); hc.addEventListener("change", sync); sync();
@@ -994,7 +995,7 @@ function pptDialog(i) {
   });
   const hasOld = IBOX.some(([k]) => i[k]);
   const body = h("div", { class: "ppt-dlg" },
-    h("div", { class: "help" }, "체크한 내용만 슬라이드에 들어갑니다. 비어 있는 항목은 줄째 빠지고, 칸 전체가 비면 '-'로 나옵니다. 글이 많으면 글자를 줄이고(최소 9pt), 그래도 넘치면 유첨 장이 붙습니다."),
+    h("div", { class: "help" }, "체크한 내용만 슬라이드에 들어갑니다. 비어 있거나 "-"만 적힌 항목은 줄째 빠지고, 칸 전체가 비면 '-'로 나옵니다. 글이 많으면 글자를 줄이고(항목 제목 9.5pt · 내용 8.5pt까지), 그래도 넘치면 유첨 장이 붙습니다."),
     h("div", { class: "row", style: "gap:18px;flex-wrap:wrap" }, ck("info", "기본 정보", "(발생처 · 발생일 · 담당 · Target · 단계 · 지연 사유)"), ck("image", "첨부 이미지", i.has_image ? "" : "(없음)", !!i.has_image), ck("old", "이전 기록", hasOld ? "(예전 4칸 글)" : "(없음)", hasOld)),
     h("div", { class: "ppt-grid" }, boxes),
     h("div", { class: "row", style: "margin-top:6px" }, h("button", { class: "btn sm", onclick: () => body.querySelectorAll("input[type=checkbox]").forEach(c => { c.checked = true; c.dispatchEvent(new Event("change")); }) }, "모두 선택")));
