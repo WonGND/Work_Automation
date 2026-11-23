@@ -6,7 +6,9 @@ import { ctx, personStats, periodRange, today, addDays, scheduleState, num, isWo
 import { ensureFixedRows, importWork } from "./seed";
 import { missReminder } from "./remind";
 import { join } from "node:path";
-import { existsSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { buildPptx, pptName, type PptIssue } from "./pptx";
+import { PPT_TPL } from "./ppt_tpl";   // 0.7.3: 연구소 표준용지 (tools/mk_ppt_tpl.py 가 만듦)
 
 export class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 const err = (s: number, m: string) => { throw new HttpError(s, m); };
@@ -61,7 +63,7 @@ function meta(u: User) {
     reqPending: q1("SELECT COUNT(*) n FROM requests WHERE to_id=? AND status='대기' AND hidden_to=0", u.id)?.n || 0,
     dots: dotCount(u.id),
     prefs: Object.fromEntries(q("SELECT key,value FROM user_prefs WHERE user_id=?", u.id).map((r: any) => [r.key, r.value])),
-    issueTpl: TPL.map(([b, its], k) => ({ key: b, title: BOXES[k][1], items: its.map(([c, l, hint]) => ({ code: c, label: l, hint })) })),
+    issueTpl: tplView(),
     users, models: q("SELECT * FROM models ORDER BY ord,id"), parts: q("SELECT name FROM parts ORDER BY ord").map((p: any) => p.name),
     grades: q("SELECT * FROM grades ORDER BY ord"), categories: q("SELECT * FROM categories ORDER BY ord"),
     stages: JSON.parse(getSetting("stage_names", "[]")), stagePct: JSON.parse(getSetting("stage_pct", "[]")),
@@ -96,8 +98,29 @@ export const TPL: [string, [string, string, string][]][] = [
   ["plan", [["3-1", "원인별 개선안", ""], ["3-2", "개선안별 변경점", ""], ["3-3", "효과 · 비용 · 일정", ""], ["3-4", "Risk 사항", ""], ["3-5", "재발 방지 대책", ""], ["3-6", "개선안 선정", ""], ["3-7", "검증 계획 (기준, 일정)", ""]]],
   ["verify", [["4-1", "시제품 제작", ""], ["4-2", "개선효과 검증", ""], ["4-3", "RISK 검증", ""], ["4-4", "고객사 또는 내부 4M 계획 (필요시)", ""], ["4-5", "기준서 또는 체크리스트 개정 (필요시)", ""]]],
 ];
-const ITEM_BOX: Record<string, string> = Object.fromEntries(TPL.flatMap(([b, its]) => its.map(([c]) => [c, b])));
-const ITEM_LABEL: Record<string, string> = Object.fromEntries(TPL.flatMap(([, its]) => its.map(([c, l]) => [c, l])));
+// 0.7.3: 템플릿은 기준정보(settings.issue_tpl)에서 고침. 항목 id는 바뀌지 않고(처음 항목은 "1-1" 같은 예전 번호가 id),
+// 화면 번호(1-1, 1-2 …)는 순서대로 다시 붙임. 지운 항목은 del=1 로 남겨 써 둔 글을 잃지 않음.
+type TplItem = { id: string; label: string; hint: string; del?: number };
+type TplBox = { key: string; title: string; items: TplItem[] };
+const DEF_TPL: TplBox[] = TPL.map(([b, its], k) => ({ key: b, title: BOXES[k][1], items: its.map(([c, l, hint]) => ({ id: c, label: l, hint })) }));
+let tplMemo: { raw: string; v: TplBox[] } | null = null;
+export function getTpl(): TplBox[] {
+  const raw = getSetting("issue_tpl", "");
+  if (!raw) return DEF_TPL;
+  if (tplMemo?.raw === raw) return tplMemo.v;
+  try {
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v) || v.length !== 4 || v.some((b: any, k: number) => b?.key !== BOXES[k][0] || !Array.isArray(b.items))) throw 0;
+    tplMemo = { raw, v }; return v;
+  } catch { return DEF_TPL; }
+}
+// 화면용: 칸 제목 · 살아 있는 항목(번호 붙임) · 지운 항목
+function tplView() {
+  return getTpl().map((b, k) => { let n = 0; return { key: b.key, title: b.title,
+    items: b.items.filter(it => !it.del).map(it => ({ id: it.id, code: `${k + 1}-${++n}`, label: it.label, hint: it.hint || "" })),
+    deleted: b.items.filter(it => it.del).map(it => ({ id: it.id, label: it.label })) }; });
+}
+const itemBox = (id: string) => getTpl().find(b => b.items.some(it => it.id === id))?.key || "";
 function itemsOf(i: any): Record<string, string> { try { const o = JSON.parse(i.items || "{}"); return o && typeof o === "object" ? o : {}; } catch { return {}; } }
 const nowLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16).replace("T", " ");   // 서버 시간대(Asia/Seoul) 기준
 function boxMeta(i: any) { try { const o = JSON.parse(i.box_meta || "{}"); return o && typeof o === "object" ? o : {}; } catch { return {}; } }
@@ -105,10 +128,12 @@ function boxMeta(i: any) { try { const o = JSON.parse(i.box_meta || "{}"); retur
 // 이슈 정리 '현재 진행' = 내용이 있는 가장 뒤 칸 → 그 칸에서 가장 뒤의 채운 항목 (없으면 그 칸의 이전 기록)
 function nowBox(i: any) {
   const it = itemsOf(i);
-  for (let k = TPL.length - 1; k >= 0; k--) {
-    const [bk, its] = TPL[k];
-    for (let j = its.length - 1; j >= 0; j--) { const t = str(it[its[j][0]], 4000); if (t) return { key: bk, label: `${its[j][0]} ${its[j][1]}`, box: BOXES[k][1], text: t }; }
-    const t = str(i[bk], 4000); if (t) return { key: bk, label: BOXES[k][1], box: BOXES[k][1], text: t, legacy: true };
+  const tv = tplView();
+  for (let k = tv.length - 1; k >= 0; k--) {
+    const b = tv[k];
+    for (let j = b.items.length - 1; j >= 0; j--) { const t = str(it[b.items[j].id], 4000); if (t) return { key: b.key, label: `${b.items[j].code} ${b.items[j].label}`, box: b.title, text: t }; }
+    for (const d of b.deleted) { const t = str(it[d.id], 4000); if (t) return { key: b.key, label: `삭제된 항목 · ${d.label}`, box: b.title, text: t }; }
+    const t = str(i[b.key], 4000); if (t) return { key: b.key, label: b.title, box: b.title, text: t, legacy: true };
   }
   return null;
 }
@@ -731,7 +756,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       const meta: any = {}; const stamp = { at: nowLocal(), by: me.name };
       for (const [k] of BOXES) if (str(body[k], 4000)) meta[k] = stamp;
       const its: Record<string, string> = {};   // 0.7.2: 템플릿 항목
-      if (body.items && typeof body.items === "object") for (const [c, v] of Object.entries(body.items)) { if (!ITEM_BOX[c]) err(400, `없는 항목입니다: ${c}`); const t = str(v, 4000); if (t) { its[c] = t; meta[ITEM_BOX[c]] = stamp; } }
+      if (body.items && typeof body.items === "object") for (const [c, v] of Object.entries(body.items)) { if (!itemBox(c)) err(400, `없는 항목입니다: ${c}`); const t = str(v, 4000); if (t) { its[c] = t; meta[itemBox(c)] = stamp; } }
       const r = run(`INSERT INTO issues(no,model_id,title,source,occurred,target,stage,status_text,cause,plan,verify,box_meta,items,note,importance,created_by) VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?)`,
         no, model_id, title, str(body.source, 20), dOrNull(body.occurred) || today(), dOrNull(body.target), str(body.status_text, 4000), str(body.cause, 4000), str(body.plan, 4000), str(body.verify, 4000), JSON.stringify(meta), JSON.stringify(its), str(body.note), str(body.importance, 5), me.id);
       id = Number(r.lastInsertRowid);
@@ -740,7 +765,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     audit(me.id, "이슈 등록", no, body);
     return json(issueRow(q1("SELECT * FROM issues WHERE id=?", id)));
   }
-  mt = p.match(/^\/api\/issues\/(\d+)(\/me|\/hide|\/image)?$/);
+  mt = p.match(/^\/api\/issues\/(\d+)(\/me|\/hide|\/image|\/pptx)?$/);
   if (mt) {
     const iss = q1("SELECT * FROM issues WHERE id=?", Number(mt[1])); if (!iss) err(404, "없는 이슈입니다");
     const mem = membersOf(iss.id); const myRole = mem.find((x: any) => x.user_id === me.id)?.role;
@@ -749,6 +774,28 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       if (!manage && !myRole) err(403, "볼 수 없습니다 (우리 파트 이슈 · 내가 담당인 이슈만)");
       const logs = q("SELECT l.*, u.name FROM issue_logs l JOIN users u ON u.id=l.user_id WHERE issue_id=? ORDER BY date DESC, u.ord", iss.id);
       return json({ ...issueRow(iss), logs, canManage: manage, myRole: myRole || "" });
+    }
+    // 0.7.3: PPT 내보내기 (그 이슈를 볼 수 있는 사람 모두) — body: { info, image, old, off: [칸 key · 항목 id] }
+    if (mt[2] === "/pptx" && m === "POST") {
+      if (!manage && !myRole) err(403, "볼 수 없습니다 (우리 파트 이슈 · 내가 담당인 이슈만)");
+      const o = body || {}; const off = new Set<string>(Array.isArray(o.off) ? o.off.map(String) : []);
+      const row = issueRow(iss); const its = itemsOf(iss); const tv = tplView();
+      const lead = mem.find((x: any) => x.role === "정")?.name || "", subs = mem.filter((x: any) => x.role !== "정").map((x: any) => x.name).join(", ");
+      const stages = JSON.parse(getSetting("stage_names", "[]"));
+      let image: PptIssue["image"] = null;
+      if (o.image !== false) { const f = imgPath(iss.image); const ext = (iss.image || "").split(".").pop() || ""; if (f && existsSync(f) && ["png", "jpg", "gif"].includes(ext)) image = { data: new Uint8Array(readFileSync(f)), ext }; }
+      const pi: PptIssue = { no: iss.no, model: row.model, title: iss.title,
+        info: o.info === false ? undefined : [{ label: "발생처", value: iss.source || "" }, { label: "발생일", value: iss.occurred || "" }, { label: "담당 (정 / 부)", value: [lead, subs].filter(Boolean).join(" / ") }, { label: "Target", value: iss.target || "" }, { label: "단계", value: iss.done ? "완료" : (stages[(iss.stage || 1) - 1] || "") }],
+        delay: o.info === false ? "" : (iss.delay_reason || ""),
+        boxes: tv.map(b => off.has(b.key) ? { title: b.title, items: [], old: "" } : { title: b.title,
+          items: [...b.items.filter(it => !off.has(it.id)).map(it => ({ code: it.code, label: it.label, text: its[it.id] || "" })),
+                  ...b.deleted.filter(it => !off.has(it.id)).map(it => ({ code: "", label: `(삭제된 항목) ${it.label}`, text: its[it.id] || "" }))],
+          old: o.old === false ? "" : (iss[b.key] || "") }),
+        image };
+      const out = buildPptx(Uint8Array.from(Buffer.from(PPT_TPL, "base64")), pi);
+      const name = pptName(row.model, iss.title);
+      audit(me.id, "이슈 PPT", iss.no, { 끔: [...off].join(",") });
+      return new Response(out, { headers: { "content-type": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "content-disposition": `attachment; filename="issue.pptx"; filename*=UTF-8''${encodeURIComponent(name)}`, "cache-control": "no-store" } });
     }
     // 0.6.0: 첨부 이미지 (이슈당 한 장 · 데이터 폴더의 '이미지' 폴더 · DB와 자동 백업에는 들어가지 않음)
     if (mt[2] === "/image") {
@@ -806,11 +853,11 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       if (body.items && typeof body.items === "object") {
         const cur = itemsOf(iss); let ch = false;
         for (const [c, v] of Object.entries(body.items)) {
-          if (!ITEM_BOX[c]) err(400, `없는 항목입니다: ${c}`);
+          if (!itemBox(c)) err(400, `없는 항목입니다: ${c}`);
           const t = str(v, 4000); if ((cur[c] || "") === t) continue;
           if (!manage) err(403, `${NOPERM} (PL · 팀장만 고칠 수 있는 칸)`);
           if (t) cur[c] = t; else delete cur[c];
-          touched.add(ITEM_BOX[c]); ch = true;
+          touched.add(itemBox(c)); ch = true;
         }
         if (ch) set.items = JSON.stringify(cur);
       }
@@ -846,6 +893,37 @@ export async function handle(req: Request, url: URL): Promise<Response> {
   if (p.startsWith("/api/master/")) {
     if (!isAdmin(me) && !isPL(me)) err(403, "기준정보는 마스터 · 팀장 · PL만 고칩니다");
     const what = p.slice(12);
+    // 0.7.3: 이슈 템플릿 (마스터 · 팀장만) — 칸 4개 고정 · 칸 제목 · 항목(이름 · 설명 · 순서 · 지우기/살리기)
+    if (m === "PUT" && what === "issue-tpl") {
+      if (!isAdmin(me)) err(403, "이슈 템플릿은 마스터 · 팀장만 고칩니다");
+      const cur = getTpl(); const bs = body.boxes;
+      if (!Array.isArray(bs) || bs.length !== 4) err(400, "칸은 4개입니다");
+      const used = new Set<string>(); const allIds = new Set(cur.flatMap(b => b.items.map(it => it.id)));
+      // 이슈에 써 둔 항목 id (지워도 남겨야 함)
+      const inData = new Set<string>(); for (const r of q("SELECT items FROM issues WHERE items<>'{}' AND items<>''")) { try { Object.keys(JSON.parse(r.items)).forEach(k => inData.add(k)); } catch {} }
+      let seq = 0;
+      const out: TplBox[] = BOXES.map(([key], k) => {
+        const b = bs[k] || {};
+        if (b.key && b.key !== key) err(400, "칸 순서는 바꿀 수 없습니다");
+        const title = str(b.title, 30); if (!title) err(400, `${k + 1}번 칸 제목을 입력하세요`);
+        const items: TplItem[] = [];
+        for (const it of Array.isArray(b.items) ? b.items : []) {
+          const label = str(it.label, 60), hint = str(it.hint, 200);
+          let id = str(it.id, 40);
+          if (id && !allIds.has(id)) err(400, `없는 항목입니다: ${id}`);
+          if (id && used.has(id)) err(400, `같은 항목이 두 번 있습니다: ${label}`);
+          if (!label) { if (!it.del) err(400, `${title} 칸에 이름이 빈 항목이 있습니다`); }
+          if (!id) { if (it.del) continue; id = `n${Date.now().toString(36)}${(seq++).toString(36)}`; }
+          used.add(id); items.push({ id, label: label || cur.flatMap(x => x.items).find(x => x.id === id)?.label || id, hint, ...(it.del ? { del: 1 } : {}) });
+        }
+        return { key, title, items };
+      });
+      // 보내지 않은 예전 항목은 지운 것으로 남김 (써 둔 글이 있으면 반드시)
+      for (const b of cur) for (const it of b.items) if (!used.has(it.id) && (inData.has(it.id) || !it.del)) out.find(x => x.key === b.key)!.items.push({ ...it, del: 1 });
+      if (!out.some(b => b.items.some(it => !it.del))) err(400, "항목이 하나도 없습니다");
+      setSetting("issue_tpl", JSON.stringify(out)); audit(me.id, "이슈 템플릿 수정", "", { 칸: out.map(b => `${b.title}(${b.items.filter(i => !i.del).length})`).join(" · ") });
+      return json({ ok: true, issueTpl: tplView() });
+    }
     if (m === "PUT" && what === "judge") {
       const list = JSON.parse(getSetting("judge", "[]"));
       for (const it of body.items || []) { const j = list[Number(it.i)]; if (!j) continue; j.text = str(it.text, 60); j.action = str(it.action, 200); }

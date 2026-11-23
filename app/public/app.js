@@ -49,15 +49,34 @@ function typeBox(msg, word) {
     setTimeout(() => inp.focus(), 50);
   });
 }
+// 0.7.3: 모든 창은 제목 줄을 끌어 옮길 수 있음 (닫으면 다음엔 다시 가운데).
+// opts.modeless: 뒤 화면을 가리지 않음 — 창을 띄운 채 뒤 목록을 스크롤 · 검색하고 다른 이슈를 열어 볼 수 있음 (등록 · 수정 창)
+let MODAL_Z = 100;
+const topBg = () => [...document.querySelectorAll(".modal-bg")].sort((a, b) => (+a.style.zIndex || 0) - (+b.style.zIndex || 0)).pop();
+function dragByHeader(box, hd) {
+  hd.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.target.closest("button,input,select,textarea,a,label")) return;
+    const r = box.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    box.classList.add("moved"); box.style.left = r.left + "px"; box.style.top = r.top + "px"; box.style.width = r.width + "px";
+    hd.setPointerCapture(e.pointerId); e.preventDefault();
+    const mv = ev => { const x = Math.min(innerWidth - 80, Math.max(80 - r.width, ev.clientX - dx)), y = Math.min(innerHeight - 40, Math.max(0, ev.clientY - dy)); box.style.left = x + "px"; box.style.top = y + "px"; };
+    const up = () => { hd.removeEventListener("pointermove", mv); hd.removeEventListener("pointerup", up); hd.removeEventListener("pointercancel", up); };
+    hd.addEventListener("pointermove", mv); hd.addEventListener("pointerup", up); hd.addEventListener("pointercancel", up);
+  });
+}
 function modal(title, body, buttons, opts = {}) {
-  const bg = h("div", { class: "modal-bg" });
+  const bg = h("div", { class: "modal-bg" + (opts.modeless ? " modeless" : "") });
+  bg.style.zIndex = ++MODAL_Z;
+  bg.addEventListener("pointerdown", () => { if (bg !== topBg()) bg.style.zIndex = ++MODAL_Z; }, true);   // 누른 창을 맨 앞으로
   let gone = false;
   const close = () => { if (gone) return; gone = true; bg.remove(); opts.onClose?.(); };
   const tryClose = async () => { if (opts.beforeClose && !(await opts.beforeClose())) return; close(); };
   const ft = h("div", { class: "ft" });
   for (const b of buttons || []) ft.append(h("button", { class: "btn " + (b.cls || ""), onclick: async () => { try { const r = await b.fn?.(); if (r !== false) close(); } catch (e) { toast(e.message, true); } } }, b.text));
   if (!opts.noClose) ft.append(h("button", { class: "btn", onclick: tryClose }, "닫기"));
-  bg.append(h("div", { class: "modal" + (opts.cls ? " " + opts.cls : "") }, h("div", { class: "hd" }, title), h("div", { class: "bd" }, body), ft));
+  const hd = h("div", { class: "hd", title: "제목 줄을 끌어서 창을 옮길 수 있습니다" }, title);
+  const box = h("div", { class: "modal" + (opts.cls ? " " + opts.cls : "") }, hd, h("div", { class: "bd" }, body), ft);
+  bg.append(box); dragByHeader(box, hd);
   bg.addEventListener("mousedown", e => { if (e.target === bg && !opts.noBgClose) close(); });
   document.body.append(bg);
   return close;
@@ -772,7 +791,7 @@ async function taskModal(t0, readonly, after) {
   if (!readonly && !isNew && !t.fixed) btns.unshift(t.hidden
     ? { text: "되살리기", fn: async () => { await api("POST", `/api/tasks/${t.id}/hide`, { hidden: false }); toast("되살렸습니다"); await after(); } }
     : { text: "삭제 (숨김)", cls: "danger", fn: async () => { if (!(await confirmBox("이 업무를 목록에서 숨깁니다.\n넣은 시간은 그대로 남아 집계에 들어가고, '삭제한 업무'에서 되살릴 수 있습니다."))) return false; await api("POST", `/api/tasks/${t.id}/hide`, { hidden: true }); toast("숨겼습니다"); await after(); } });
-  modal(isNew ? "업무 추가" : (readonly ? "업무 보기" : "업무"), body, btns);
+  modal(isNew ? "업무 추가" : (readonly ? "업무 보기" : "업무"), body, btns, { modeless: !readonly });
   if (isNew) setTimeout(() => title.focus(), 50);
 }
 function tabbed(list) {
@@ -822,7 +841,7 @@ function issueCard(i) {
       h("div", {}, h("b", {}, "Target (PL)"), i.target || "-"), h("div", {}, h("b", {}, "담당 (정 · 부1 · 부2)"), ["정", "부1", "부2"].map(r => i.members.find(m => m.role === r)).filter(Boolean).map(m => m.name).join(" · ") || "-"), h("div", {}, h("b", {}, "진척"), Math.round(i.progress * 100) + "%")),
     h("div", { class: "row", style: "margin:10px 0 6px" }, h("b", {}, "진행 현황"), h("span", { class: "muted small" }, "PL · 팀장이 씁니다"), h("div", { class: "spacer" }),
       h("button", { class: "btn sm", onclick: () => issueBoard(i, () => route()) }, i.has_image ? "크게 보기 · 🖼 첨부 이미지" : "크게 보기")),
-    h("div", { class: "ibox-grid mini" }, IBOX.map(([k, t, , cls, ic]) => h("section", { class: "ibox " + cls }, h("div", { class: "ibox-hd" }, h("span", { class: "ibox-ic", html: ic }), h("b", {}, t)), h("div", { class: "ibox-ro" }, boxLines(i, k))))),
+    h("div", { class: "ibox-grid mini" }, IBOX.map(([k, , , cls, ic], _n, _a, t = boxTitle(k)) => h("section", { class: "ibox " + cls }, h("div", { class: "ibox-hd" }, h("span", { class: "ibox-ic", html: ic }), h("b", {}, t)), h("div", { class: "ibox-ro" }, boxLines(i, k))))),
     h("div", { class: "form", style: "margin-top:12px" }, ...field("단계 (PL)", stage),
       ...field("지연 사유 (PL)", h("div", {}, delay, h("div", { class: "lock" }, "🔒 PL만 입력합니다"))), ...field("내 업무 분류", cat)),
     h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn pri", onclick: async () => {
@@ -893,11 +912,16 @@ const IBOX = [
 ];
 const nowCell = i => (i.now ? [badge("now " + (IBOX.find(b => b[0] === i.now.key)?.[3] || ""), i.now.label), " ", i.now.text] : "");
 // 0.7.2: 칸별 템플릿 항목 (서버 M.issueTpl) · 글이 늘면 칸이 따라 늘어남
-const tplItems = k => (M.issueTpl || []).find(b => b.key === k)?.items || [];
+// 0.7.3: 칸 제목 · 항목은 기준정보 '이슈 템플릿'에서 고침 (항목 id = 저장 키, code = 화면 번호)
+const tplBox = k => (M.issueTpl || []).find(b => b.key === k);
+const tplItems = k => tplBox(k)?.items || [];
+const tplDeleted = k => tplBox(k)?.deleted || [];
+const boxTitle = k => tplBox(k)?.title || IBOX.find(b => b[0] === k)?.[1] || k;
 const grow = ta => { ta.style.height = "auto"; ta.style.height = Math.max(ta.scrollHeight + 2, 34) + "px"; };
 // 읽기용: 칸의 채운 항목 (+ 이전 기록)
 function boxLines(i, k) {
-  const out = tplItems(k).filter(it => (i.items || {})[it.code]).map(it => h("div", { class: "iline" }, h("b", {}, `${it.code} ${it.label}`), h("div", { class: "pre" }, i.items[it.code])));
+  const out = tplItems(k).filter(it => (i.items || {})[it.id]).map(it => h("div", { class: "iline" }, h("b", {}, `${it.code} ${it.label}`), h("div", { class: "pre" }, i.items[it.id])));
+  for (const d of tplDeleted(k)) if ((i.items || {})[d.id]) out.push(h("div", { class: "iline old" }, h("b", {}, `삭제된 항목 · ${d.label}`), h("div", { class: "pre" }, i.items[d.id])));
   if (i[k]) out.push(h("div", { class: "iline old" }, h("b", {}, "이전 기록"), h("div", { class: "pre" }, i[k])));
   return out.length ? out : [h("span", { class: "muted" }, "-")];
 }
@@ -955,6 +979,36 @@ function issueActivity(i) {
       logs.length ? h("div", { class: "timeline" }, logs.slice(0, 30).map(l => h("div", { class: "it" }, h("div", { class: "d" }, `${l.date} · ${fmtH(l.hours)}h`), h("div", { class: "pre" }, l.text || h("span", { class: "muted" }, "(시간만)"))))) : h("div", { class: "muted small" }, "기록 없음"));
   }) : h("div", { class: "muted" }, "담당자가 없습니다."));
 }
+// 0.7.3: PPT 내보내기 — 연구소 표준용지 한 장 (넘치면 유첨 장). 고른 항목은 사람마다 기억 (기본 = 전부)
+function pptDialog(i) {
+  const off = new Set(getPref("pptOff", []));
+  const ck = (key, label, sub, on = true) => { const c = h("input", { type: "checkbox", checked: !off.has(key) }); c.dataset.k = key; return h("label", { class: "chk" + (on ? "" : " dim") }, c, " ", label, sub ? h("span", { class: "muted small" }, " " + sub) : ""); };
+  const its = i.items || {};
+  const boxes = IBOX.map(([k]) => {
+    const head = ck(k, h("b", {}, boxTitle(k)));
+    const rows = tplItems(k).map(it => ck(it.id, `${it.code} ${it.label}`, its[it.id] ? "" : "(비어 있음)", !!its[it.id]));
+    for (const d of tplDeleted(k)) if (its[d.id]) rows.push(ck(d.id, `삭제된 항목 · ${d.label}`, ""));
+    const sub = h("div", { class: "ppt-items" }, rows);
+    const hc = head.querySelector("input"); const sync = () => sub.classList.toggle("off", !hc.checked); hc.addEventListener("change", sync); sync();
+    return h("div", { class: "ppt-box" }, head, sub);
+  });
+  const hasOld = IBOX.some(([k]) => i[k]);
+  const body = h("div", { class: "ppt-dlg" },
+    h("div", { class: "help" }, "체크한 내용만 슬라이드에 들어갑니다. 비어 있는 항목은 줄째 빠지고, 칸 전체가 비면 '-'로 나옵니다. 글이 많으면 글자를 줄이고(최소 9pt), 그래도 넘치면 유첨 장이 붙습니다."),
+    h("div", { class: "row", style: "gap:18px;flex-wrap:wrap" }, ck("info", "기본 정보", "(발생처 · 발생일 · 담당 · Target · 단계 · 지연 사유)"), ck("image", "첨부 이미지", i.has_image ? "" : "(없음)", !!i.has_image), ck("old", "이전 기록", hasOld ? "(예전 4칸 글)" : "(없음)", hasOld)),
+    h("div", { class: "ppt-grid" }, boxes),
+    h("div", { class: "row", style: "margin-top:6px" }, h("button", { class: "btn sm", onclick: () => body.querySelectorAll("input[type=checkbox]").forEach(c => { c.checked = true; c.dispatchEvent(new Event("change")); }) }, "모두 선택")));
+  modal(`${i.no} PPT 내보내기`, body, [{ text: "내려받기", cls: "pri", fn: async () => {
+    const offNow = [...body.querySelectorAll("input[type=checkbox]")].filter(c => !c.checked).map(c => c.dataset.k);
+    setPref("pptOff", offNow);
+    const r = await fetch(`/api/issues/${i.id}/pptx`, { method: "POST", headers: { "content-type": "application/json", "x-req": "1" }, body: JSON.stringify({ info: !offNow.includes("info"), image: !offNow.includes("image"), old: !offNow.includes("old"), off: offNow.filter(k => !["info", "image", "old"].includes(k)) }) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `오류 ${r.status}`); }
+    const blob = await r.blob();
+    const cd = r.headers.get("content-disposition") || ""; const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+    const a = h("a", { href: URL.createObjectURL(blob), download: m ? decodeURIComponent(m[1]) : `${i.no}.pptx` }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    toast("PPT를 내려받았습니다");
+  } }], { cls: "ppt" });
+}
 // 0.6.0: 이슈 창 — 왼쪽 이슈 정보(번호 ~ 부2 · 첨부 이미지), 오른쪽 진행 현황 4칸
 async function issueBoard(i0, after) {
   const i = await api("GET", `/api/issues/${i0.id}`);
@@ -965,10 +1019,14 @@ async function issueBoard(i0, after) {
   const dirty = () => IBOX.some(([k]) => areas[k] && areas[k].value !== (i[k] || "")) || Object.entries(items).some(([c, ta]) => ta.value !== (i.items[c] || ""));
   const tas = [];
   const mkTa = (v, ph) => { const ta = h("textarea", { readOnly: !can, placeholder: can ? ph : "", spellcheck: "false", rows: 1 }, v || ""); ta.addEventListener("input", () => grow(ta)); tas.push(ta); return ta; };
-  const boxes = IBOX.map(([k, t, ask, cls, ic], n) => {
+  const boxes = IBOX.map(([k, , ask, cls, ic], n) => {
+    const t = boxTitle(k);
     const mt = i.box_meta?.[k];
-    const rows = tplItems(k).map(it => { const ta = mkTa(i.items[it.code], it.hint || (can ? "내용을 입력하세요" : "")); items[it.code] = ta;
-      return h("div", { class: "iitem" + (i.items[it.code] ? " has" : "") }, h("label", { class: "iitem-lb" }, h("span", { class: "iitem-no" }, it.code + "."), " ", it.label), ta); });
+    const rows = tplItems(k).map(it => { const ta = mkTa(i.items[it.id], it.hint || (can ? "내용을 입력하세요" : "")); items[it.id] = ta;
+      return h("div", { class: "iitem" + (i.items[it.id] ? " has" : "") }, h("label", { class: "iitem-lb" }, h("span", { class: "iitem-no" }, it.code + "."), " ", it.label), ta); });
+    // 기준정보에서 지운 항목이라도 글이 있으면 보여 줌 (비우고 저장하면 사라짐)
+    for (const d of tplDeleted(k)) if (i.items[d.id]) { const ta = mkTa(i.items[d.id], ""); items[d.id] = ta;
+      rows.push(h("div", { class: "iitem old" }, h("label", { class: "iitem-lb" }, `삭제된 항목 · ${d.label}`, h("span", { class: "muted small", style: "font-weight:400" }, can ? " · 다른 항목으로 옮겨 적은 뒤 비우고 저장하면 사라집니다" : "")), ta)); }
     let old = "";
     if (i[k]) { const ta = mkTa(i[k], ""); areas[k] = ta;   // 예전 4칸 글: 항목으로 옮겨 적고 비우면 사라짐
       old = h("div", { class: "iitem old" }, h("label", { class: "iitem-lb" }, "이전 기록", h("span", { class: "muted small", style: "font-weight:400" }, can ? " · 위 항목으로 옮겨 적은 뒤 비우고 저장하면 사라집니다" : "")), ta); }
@@ -1004,9 +1062,10 @@ async function issueBoard(i0, after) {
     imgBox,
     h("div", { class: "row iside-btns" },
       can ? h("button", { class: "btn sm", onclick: async () => { if (dirty()) return toast("칸에 쓴 내용을 먼저 저장해 주세요", true); close(); await issueForm(i, after); } }, "정보 · 담당 고치기") : "",
+      h("button", { class: "btn sm", onclick: () => { if (dirty()) return toast("칸에 쓴 내용을 먼저 저장해 주세요", true); pptDialog(i); } }, "PPT 내보내기"),
       h("button", { class: "btn sm", onclick: () => modal(`${i.no} 담당별 투입 · 한 일 (${fmtH(i.hours.reduce((a, x) => a + x.h, 0))}h)`, issueActivity(i), []) }, "담당별 투입 · 한 일")));
   const body = h("div", { class: "iboard" }, side, h("div", { class: "ibox-grid" }, boxes));
-  const top = () => { const all = document.querySelectorAll(".modal-bg"); return all.length && all[all.length - 1].contains(body); };
+  const top = () => !!topBg()?.contains(body);
   const onPaste = e => { if (!top() || !can) return; const f = clipImage(e.clipboardData); if (f) { e.preventDefault(); upload(f); } else if (!editableTarget(e)) toast(NO_IMG, true); };
   document.addEventListener("paste", onPaste);
   const btns = can ? [{ text: "저장", cls: "pri", fn: async () => {
@@ -1077,7 +1136,7 @@ async function issueForm(i0, after) {
     h("div", { class: "full small muted" }, isNew ? "진행 현황 4칸(현상 진단 · 원인 규명 · 대책 수립 · 검증 적용)은 등록한 뒤 이슈를 눌러 씁니다." : "진행 현황 4칸은 이슈를 누르면 열리는 창에서 고칩니다."));
   const body = form;
   const btns = [];
-  const top = () => { const all = document.querySelectorAll(".modal-bg"); return all.length && all[all.length - 1].contains(form); };
+  const top = () => !!topBg()?.contains(form);
   const onPaste = e => { if (!top() || !can) return; const f = clipImage(e.clipboardData); if (f) { e.preventDefault(); setPend(f); } else if (!editableTarget(e)) toast(NO_IMG, true); };
   if (can) document.addEventListener("paste", onPaste);
   if (can) btns.push({ text: "저장", cls: "pri", fn: async () => {
@@ -1102,7 +1161,7 @@ async function issueForm(i0, after) {
     : { text: "삭제 (숨김)", cls: "danger", fn: async () => {
       const reason = await promptBox("삭제 사유", "예: 중복 등록, 잘못 만든 이슈"); if (!reason) return false;
       await api("POST", `/api/issues/${i.id}/hide`, { hidden: true, reason }); toast("숨겼습니다 (기록과 시간은 남음)"); await after(); } });
-  modal(isNew ? "새 이슈 등록" : `${i.no} 정보 · 담당 고치기`, body, btns, { onClose: () => { document.removeEventListener("paste", onPaste); if (pendUrl) URL.revokeObjectURL(pendUrl); } });
+  modal(isNew ? "새 이슈 등록" : `${i.no} 정보 · 담당 고치기`, body, btns, { modeless: true, onClose: () => { document.removeEventListener("paste", onPaste); if (pendUrl) URL.revokeObjectURL(pendUrl); } });
   // 끌어다 놓기
   if (can) { imgArea.addEventListener("dragover", e => { if (e.dataTransfer?.types?.includes("Files")) { e.preventDefault(); imgArea.classList.add("drag"); } });
     imgArea.addEventListener("dragleave", () => imgArea.classList.remove("drag"));
@@ -1318,13 +1377,51 @@ async function pagePeople(uid) {
       return h("div", { class: "part-col" }, h("div", { class: "part-hd" }, p || "파트 없음", h("span", { class: "muted small" }, ` ${us.length}명`)), ...us.map(card)); })));
 }
 
+// 0.7.3: 기준정보 → 이슈 템플릿 (마스터 · 팀장). 칸 4개는 고정, 칸 제목 · 항목 이름 · 설명 · 순서를 고침.
+// 항목을 지워도 이슈에 써 둔 글은 남고 그 이슈 칸 아래 '삭제된 항목'으로 보임. 지운 항목은 [살리기]로 되돌림.
+function pageTplEdit(body) {
+  const st = (M.issueTpl || []).map(b => ({ key: b.key, title: b.title, items: b.items.map(x => ({ id: x.id, label: x.label, hint: x.hint })), deleted: b.deleted.map(x => ({ id: x.id, label: x.label, hint: "" })) }));
+  let dirty = false;
+  const draw = () => {
+    const cards = st.map((b, bi) => {
+      const title = h("input", { class: "inp", value: b.title, maxlength: 30, style: "font-weight:700;width:220px" });
+      title.addEventListener("input", () => { b.title = title.value; dirty = true; });
+      const rows = b.items.map((it, k) => {
+        const lb = h("input", { class: "inp", value: it.label, maxlength: 60, placeholder: "항목 이름" });
+        const hn = h("input", { class: "inp", value: it.hint, maxlength: 200, placeholder: "입력 칸 안내 (흐리게 보이는 예시)" });
+        lb.addEventListener("input", () => { it.label = lb.value; dirty = true; }); hn.addEventListener("input", () => { it.hint = hn.value; dirty = true; });
+        const mv = d => { const j = k + d; if (j < 0 || j >= b.items.length) return; [b.items[k], b.items[j]] = [b.items[j], b.items[k]]; dirty = true; draw(); };
+        return h("tr", {}, h("td", { class: "c no" }, `${bi + 1}-${k + 1}`), h("td", {}, lb), h("td", {}, hn),
+          h("td", { class: "c", style: "white-space:nowrap" }, h("button", { class: "btn sm", title: "위로", onclick: () => mv(-1) }, "↑"), h("button", { class: "btn sm", title: "아래로", onclick: () => mv(1) }, "↓"),
+            h("button", { class: "btn sm danger", onclick: () => { b.items.splice(k, 1); if (it.id) b.deleted.push(it); dirty = true; draw(); } }, "지우기")));
+      });
+      return h("div", { class: "card tpl-card" },
+        h("div", { class: "row" }, h("span", { class: "ibox-no" }, bi + 1), title, h("span", { class: "muted small" }, `항목 ${b.items.length}개`), h("div", { class: "spacer" }),
+          h("button", { class: "btn sm", onclick: () => { b.items.push({ id: "", label: "", hint: "" }); dirty = true; draw(); } }, "+ 항목 추가")),
+        h("table", { class: "tpl-tb" }, h("thead", {}, h("tr", {}, h("th", {}, "번호"), h("th", {}, "항목 이름"), h("th", {}, "설명 (입력 칸 안내)"), h("th", {}, ""))), h("tbody", {}, rows)),
+        b.deleted.length ? h("div", { class: "tpl-del" }, h("span", { class: "muted small" }, "지운 항목: "), b.deleted.map((d, k) => h("span", { class: "tpl-del-it" }, d.label, " ", h("button", { class: "link2", onclick: () => { b.deleted.splice(k, 1); b.items.push(d); dirty = true; draw(); } }, "살리기")))) : "");
+    });
+    body.replaceChildren(
+      h("div", { class: "help" }, "이슈 창 진행 현황 4칸의 제목과 항목을 고칩니다 (마스터 · 팀장). 번호는 순서대로 자동으로 붙습니다. 항목을 지워도 이슈에 써 둔 글은 지워지지 않고, 그 이슈 칸 아래 '삭제된 항목'으로 남습니다. 지운 항목은 [살리기]로 되돌릴 수 있습니다."),
+      h("div", { class: "tpl-grid" }, cards),
+      h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn pri", onclick: async () => {
+        try {
+          const boxes = st.map(b => ({ key: b.key, title: b.title, items: [...b.items.map(x => ({ id: x.id, label: x.label, hint: x.hint })), ...b.deleted.map(x => ({ id: x.id, label: x.label, del: 1 }))] }));
+          const r = await api("PUT", "/api/master/issue-tpl", { boxes });
+          M.issueTpl = r.issueTpl; dirty = false; toast("이슈 템플릿을 저장했습니다"); pageMaster();
+        } catch (e) { toast(e.message, true); }
+      } }, "저장"), h("button", { class: "btn", onclick: async () => { if (!dirty || await confirmBox("고친 내용을 버리고 다시 불러올까요?")) pageMaster(); } }, "되돌리기")));
+  };
+  draw();
+}
 // ── 기준정보 ──
 async function pageMaster() {
   M = await api("GET", "/api/meta");
   const tab = sessionStorage.getItem("mtab") || "g";
   const T = (k, t) => h("button", { class: tab === k ? "on" : "", onclick: () => { sessionStorage.setItem("mtab", k); pageMaster(); } }, t);
   const body = h("div");
-  app().replaceChildren(h("h1", {}, "기준정보", h("span", { class: "sub" }, "여기서 고친 값은 바로 모든 화면 계산에 반영됩니다 · 마스터 · 팀장 · PL이 고칩니다" + (M.perms.pl ? ` (모델은 ${M.perms.plPart}만)` : ""))), h("div", { class: "tabs" }, T("g", "등급 배율"), T("m", "모델"), T("h", "공휴일"), T("l", "휴직"), T("s", "기준값"), T("j", "판정 문구"), T("c", "업무 분류")), body);
+  app().replaceChildren(h("h1", {}, "기준정보", h("span", { class: "sub" }, "여기서 고친 값은 바로 모든 화면 계산에 반영됩니다 · 마스터 · 팀장 · PL이 고칩니다" + (M.perms.pl ? ` (모델은 ${M.perms.plPart}만)` : ""))), h("div", { class: "tabs" }, T("g", "등급 배율"), T("m", "모델"), T("h", "공휴일"), T("l", "휴직"), T("s", "기준값"), T("j", "판정 문구"), T("c", "업무 분류"), M.perms.admin ? T("t", "이슈 템플릿") : ""), body);
+  if (tab === "t" && M.perms.admin) pageTplEdit(body);
   if (tab === "g") {
     const ins = M.grades.map(g => ({ g, el: h("input", { class: "inp", style: "width:90px", value: Math.round(g.pct * 1000) / 10 }) }));
     const oth = h("input", { class: "inp", style: "width:90px", value: Math.round(Number(M.settings.other_pct || 0) * 1000) / 10 });

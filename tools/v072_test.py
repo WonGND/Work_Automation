@@ -41,7 +41,7 @@ omodel = next(m for m in meta["models"] if m["part"] != pl_u["part"] and m["acti
 pops = lambda uid: [r[0] for r in db.execute("SELECT text FROM notifs WHERE user_id=? ORDER BY id", (uid,))]
 
 # ── 1. 버전 · 글꼴 ──
-check("버전 0.7.2", urllib.request.urlopen(BASE + "/version").read().decode() == "업무관리 0.7.2")
+check("버전 0.7.2 이상", urllib.request.urlopen(BASE + "/version").read().decode() >= "업무관리 0.7.2")
 css = urllib.request.urlopen(BASE + "/fonts/noto.css").read().decode()
 check("글꼴 CSS 제공", "Noto Sans KR Variable" in css and "/fonts/" in css)
 fn = css.split("/fonts/")[1].split(")")[0].strip("'\"")

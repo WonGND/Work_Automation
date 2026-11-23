@@ -31,7 +31,8 @@ opl_u = next(u for u in pls if u["part"] != pl_u["part"]); opl = login(opl_u["lo
 mem_u = next(u for u in meta["users"] if u["role"] == "member" and u["part"] == pl_u["part"]); mem = login(mem_u["login"])
 model = next(m for m in meta["models"] if m["part"] == pl_u["part"] and m["active"])
 omodel = next(m for m in meta["models"] if m["part"] != pl_u["part"] and m["active"])
-W = "2026-11-16"
+import datetime as _dt
+_t = _dt.date.today(); W = str(_t - _dt.timedelta(days=_t.weekday()))   # 이번 주 월요일 (날짜에 따라 결과가 바뀌지 않게)
 week = lambda s, extra="": s.req("GET", f"/api/week?from={W}{extra}")[1]
 
 # ── PL 관리 행 ──

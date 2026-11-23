@@ -656,3 +656,31 @@ html[data-dark="1"] .ibox .iitem.old textarea{background:#332e18}
 /* 시간표 하루 합계: 연차 · 반차 · 조퇴 표시 (월 보기에서도 보임) */
 .week thead tr.sum td .lvtag{font-size:11px;font-weight:600;color:#6a4fb0;line-height:1.2;white-space:nowrap}
 html[data-dark="1"] .week thead tr.sum td .lvtag{color:#c9b6f2}
+/* ── 0.7.3 ── */
+/* 창 옮기기 · 뒤 화면 쓰기 */
+#toast{z-index:9000}
+.imgview{z-index:9500}
+.modal-bg:has(.modal.pop){z-index:8000 !important}
+.modal .hd{cursor:move;user-select:none}
+.modal .hd input,.modal .hd button,.modal .hd select{cursor:auto;user-select:auto}
+.modal.moved{position:fixed;margin:0}
+.modal-bg.modeless{background:transparent;pointer-events:none;animation:none}
+.modal-bg.modeless .modal{pointer-events:auto;box-shadow:0 12px 48px #0005,0 0 0 1px #0001}
+html[data-dark="1"] .modal-bg.modeless{background:transparent}
+html[data-dark="1"] .modal-bg.modeless .modal{box-shadow:0 12px 48px #000c}
+/* PPT 내보내기 창 */
+.ppt-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;margin-top:10px}
+.ppt-box{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.ppt-items{display:flex;flex-direction:column;gap:2px;margin:4px 0 0 20px}
+.ppt-items.off{opacity:.4;pointer-events:none}
+.ppt-dlg label.chk{display:flex;align-items:center;gap:4px;font-size:13px}
+/* 기준정보 → 이슈 템플릿 */
+.tpl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:12px}
+.tpl-card .row{gap:8px;margin-bottom:6px}
+.tpl-tb{width:100%}
+.tpl-tb td .inp{width:100%}
+.tpl-tb td.no{width:44px;font-weight:700;color:var(--muted)}
+.tpl-tb td:nth-child(2){width:34%}
+.tpl-del{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.tpl-del-it{font-size:13px;color:var(--muted);text-decoration:line-through}
+.tpl-del-it .link2{text-decoration:none}

@@ -8,6 +8,7 @@ wl_*
 # 빌드 때 만드는 모듈 (python3 tools/mk_guide.py)
 app/src/guide_img.ts
 app/src/fonts_kr.ts
+app/src/ppt_tpl.ts
 # 실행 데이터 · 비밀 (절대 올리지 않음)
 데이터/
 비밀키/

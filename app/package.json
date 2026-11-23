@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "@fontsource-variable/noto-sans-kr": "5.3.1",
+    "fflate": "^0.8.3",
     "nodemailer": "6.9.16"
   }
 }

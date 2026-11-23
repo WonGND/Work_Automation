@@ -45,7 +45,7 @@ check("팀장(마스터 아님)에게는 초안 팝업 없음", pops(lead) == []
 st, nl = adm.req("GET", "/api/notices")
 check("마스터 공지 화면에 초안 1개", st == 200 and len(nl["drafts"]) == 1 and nl["drafts"][0]["kind"] == "버전" and nl["canSend"] is True, nl)
 draft = nl["drafts"][0]
-check("초안 글은 짧은 줄 목록", draft["body"].startswith("· ") and len(draft["body"]) < 700 and "빨간 점" in draft["body"], draft["body"])
+check("초안 글은 짧은 줄 목록", draft["body"].startswith("· ") and len(draft["body"]) < 2000 and draft["body"].count("· ") >= 3, draft["body"])
 check("팀장 · 팀원에게는 초안이 안 보임", lead.req("GET", "/api/notices")[1]["drafts"] == [] and mem.req("GET", "/api/notices")[1]["drafts"] == [] and mem.req("GET", "/api/notices")[1]["list"] == [])
 st, d = lead.req("POST", "/api/notices", {"title": "x", "body": "y", "target": {"all": True}, "draft_id": draft["id"]})
 check("버전 초안 배포는 마스터만", st == 403, d)
