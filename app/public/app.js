@@ -71,6 +71,14 @@ function modal(title, body, buttons, opts = {}) {
   let gone = false;
   const close = () => { if (gone) return; gone = true; bg.remove(); opts.onClose?.(); };
   const tryClose = async () => { if (opts.beforeClose && !(await opts.beforeClose())) return; close(); };
+  // 0.7.5: Esc 로 닫기 — 쓴 내용이 있으면 "저장하지 않고 닫을까요?" (이슈 창처럼 자체 확인이 있으면 그것을 씀)
+  let dirty = false;
+  bg.addEventListener("input", () => (dirty = true)); bg.addEventListener("change", e => { if (e.target.matches?.("input,textarea,select")) dirty = true; });
+  bg._esc = opts.noClose ? null : async () => {
+    if (opts.beforeClose) return tryClose();
+    if (dirty && !opts.noDirty && !(await confirmBox("저장하지 않고 닫을까요?\n쓴 내용은 사라집니다."))) return;
+    close();
+  };
   const ft = h("div", { class: "ft" });
   for (const b of buttons || []) ft.append(h("button", { class: "btn " + (b.cls || ""), onclick: async () => { try { const r = await b.fn?.(); if (r !== false) close(); } catch (e) { toast(e.message, true); } } }, b.text));
   if (!opts.noClose) ft.append(h("button", { class: "btn", onclick: tryClose }, "닫기"));
@@ -81,6 +89,13 @@ function modal(title, body, buttons, opts = {}) {
   document.body.append(bg);
   return close;
 }
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+  if (document.querySelector(".note-inl")) return;                    // 한 줄 입력 칸이 먼저 처리
+  const t = e.target; if (t?.classList?.contains("ssel-in") && t.parentElement?.querySelector(".ssel-list:not([hidden])")) return;   // 열린 고르기 목록
+  const bg = topBg(); if (!bg || !bg._esc) return;                      // 공지 · 알림 팝업(확인 버튼만)은 Esc 로 안 닫힘
+  e.preventDefault(); bg._esc();
+});
 function confirmBox(msg) {
   return new Promise(res => { let ok = false; const body = h("div", { class: "pre" }, msg);
     modal("확인", body, [{ text: "확인", cls: "pri", fn: () => { ok = true; res(true); } }]);
@@ -488,6 +503,11 @@ function pagePw() {
       h("div", { class: "form" }, ...field("메일", em)),
       h("div", { class: "muted small", style: "margin-top:8px" }, M.mailReady ? "비밀번호를 잊으면 로그인 화면 > '비밀번호를 잊었나요?'에서 이 메일로 인증번호를 받습니다." : "메일 보내기는 서버 설정 후 쓸 수 있습니다. 그전에는 '팀장 · 마스터에게 초기화 요청'을 씁니다."),
       h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn pri", onclick: async () => { try { await api("PUT", "/api/me/email", { email: em.value.trim() }); M.myEmail = em.value.trim().toLowerCase(); toast("메일을 저장했습니다"); } catch (e) { toast(e.message, true); } } }, "메일 저장"))),
+    ...(M.perms.sheet ? [h("h2", {}, "입력 설정"), h("div", { class: "card", style: "max-width:460px" }, (() => {
+      const c = h("input", { type: "checkbox", checked: getPref("noteInline", true) });
+      c.addEventListener("change", () => { setPref("noteInline", c.checked); toast(c.checked ? "켰습니다" : "껐습니다"); });
+      return h("label", { class: "chk" }, c, " 시간을 넣으면 바로 '한 일 한 줄' 입력 칸 띄우기");
+    })(), h("div", { class: "muted small", style: "margin-top:6px" }, "끄면 ✎를 눌러서만 한 일을 씁니다. 시간은 있는데 한 일이 없는 칸은 ✎가 주황으로 보입니다."))] : []),
     h("h2", {}, "비밀번호 바꾸기"),
     M.user.must_change ? h("div", { class: "help" }, "처음 로그인입니다. 받은 비밀번호를 새 비밀번호(6자 이상)로 바꾼 뒤 사용합니다.") : "",
     h("div", { class: "card", style: "max-width:460px" }, h("div", { class: "form" }, ...field("지금 비밀번호", o), ...field("새 비밀번호", n1), ...field("새 비밀번호 확인", n2)),
@@ -570,11 +590,12 @@ async function renderWeek(box, uid, readonly, refreshAll) {
     h("b", { class: "wk-range" }, mon ? `${w.from.slice(0, 4)}년 ${Number(w.from.slice(5, 7))}월` : `${dd(w.from)} ~ ${dd(w.to)}`),
     h("button", { class: "btn sm", onclick: () => { if (mon) moveMonth(1); else { weekFrom = addDays(weekFrom, 7); again(); } } }, mon ? "다음 달 ▶" : "다음 주 ▶"),
     h("button", { class: "btn sm", onclick: () => { weekFrom = mon ? M.today : monday(M.today); again(); } }, mon ? "이번 달" : "이번 주"),
+    h("button", { class: "btn sm wk-log", title: `이 ${mon ? "달" : "주"}에 업무 · 이슈마다 넣은 시간과 한 일을 한 창에 모아 봅니다`, onclick: () => periodLog(uid, w.from, mon) }, mon ? "📝 월간 한 일 보기" : "📝 주간 한 일 보기"),
     h("div", { class: "spacer" }),
     readonly ? "" : h("button", { class: "btn", onclick: () => requestModal() }, "✉ 요청하기"),
     !readonly && M.user.role === "pl" && uid === M.user.id ? h("button", { class: "btn", title: `${M.user.part} 이슈 등록 (PL)`, onclick: () => issueForm(null, refreshAll) }, "+ 이슈 등록") : "",
     readonly ? "" : h("button", { class: "btn pri", onclick: () => taskModal(null, false, refreshAll) }, "+ 업무 추가"));
-  const thead = h("thead", {}, h("tr", {}, h("th", { class: "name" }, "업무 · 이슈"), w.days.map(d => h("th", { class: "c " + (d.workday ? "" : "we ") + (d.holiday ? "hol " : "") + (d.today ? "today" : ""), title: d.holiday || d.date }, mon ? [String(Number(d.date.slice(8))), h("div", { class: "small" }, WD[new Date(d.date + "T00:00:00").getDay()])] : dd(d.date), d.holiday && !mon ? h("div", { class: "small" }, d.holiday) : "")), h("th", { class: "c" }, "합계")));
+  const thead = h("thead", {}, h("tr", {}, h("th", { class: "name" }, "업무 · 이슈"), w.days.map(d => h("th", { class: "c day-lnk " + (d.workday ? "" : "we ") + (d.holiday ? "hol " : "") + (d.today ? "today" : ""), title: (d.holiday ? d.holiday + " · " : "") + "눌러서 그날 한 일 보기", onclick: e => { if (!e.target.closest(".col-grip")) dayLog(w, d.date, uid); } }, mon ? [String(Number(d.date.slice(8))), h("div", { class: "small" }, WD[new Date(d.date + "T00:00:00").getDay()])] : dd(d.date), d.holiday && !mon ? h("div", { class: "small" }, d.holiday) : "")), h("th", { class: "c" }, "합계")));
   const tbody = h("tbody");
   const totals = {}; const leave = {}; const early = {};
   const sumRow = h("tr", { class: "sum" });
@@ -601,7 +622,7 @@ async function renderWeek(box, uid, readonly, refreshAll) {
       const lvTag = [lv >= w.dayHours ? "연차" : lv === w.dayHours / 2 ? "반차" : lv > 0 ? `휴가 ${fmtH(lv)}h` : "", early[d.date] > 0 ? "조퇴" : ""].filter(Boolean).join(" · ");
       if (tip === "휴가") tip = "";
       const showV = v ? fmtH(v) : (lv > 0 || (d.past && d.workday && !d.leave) ? "0" : "");
-      return h("td", { class: "c " + cls, title: [lvTag, tip].filter(Boolean).join(" · ") }, h("b", {}, showV), lvTag ? h("div", { class: "lvtag" }, lvTag) : "", tip ? h("div", { class: "small" }, tip) : "");
+      return h("td", { class: "c day-lnk " + cls, title: [lvTag, tip, "눌러서 그날 한 일 보기"].filter(Boolean).join(" · "), onclick: () => dayLog(w, d.date, uid) }, h("b", {}, showV), lvTag ? h("div", { class: "lvtag" }, lvTag) : "", tip ? h("div", { class: "small" }, tip) : "");
     }), h("td", { class: "c tot" }, h("b", {}, fmtH(Object.values(totals).reduce((a, b) => a + b, 0)))));
   };
   const allInputs = [];
@@ -638,15 +659,20 @@ async function renderWeek(box, uid, readonly, refreshAll) {
         await api("PUT", "/api/hours", { type: r.type, id: r.id, date: d.date, hours: n });
         last = inp.value; if (n) r.hours[d.date] = n; else delete r.hours[d.date];
         inp.classList.remove("saved"); void inp.offsetWidth; inp.classList.add("saved"); recalc(); rowTot(); box.dispatchEvent(new Event("hours-saved"));
+        markNote();
+        // 0.7.5: 시간을 넣고 칸을 나가면 바로 "한 일 한 줄" (이미 적었거나 0이면 안 띄움 · 내 정보에서 끌 수 있음)
+        if (n && nb && !r.texts?.[d.date] && getPref("noteInline", true)) noteInline(inp, r, d.date, n, txt => { (r.texts = r.texts || {})[d.date] = txt; markNote(); });
       } catch (e) { toast(e.message, true); inp.value = last; }
     });
     let rowTot = () => {};
     const wrap = h("div", { class: "cell" }, inp);
+    let nb = null;
+    // 0.7.5: 시간은 넣었는데 한 일이 비어 있으면 ✎ 주황
+    const markNote = () => { if (!nb) return; const has = !!r.texts?.[d.date]; nb.classList.toggle("has", has); nb.classList.toggle("miss", !has && !!r.hours[d.date]); nb.title = has ? r.texts[d.date] : r.hours[d.date] ? "한 일을 아직 안 적었습니다 · 눌러서 쓰기" : "그날 한 일 쓰기"; nb.disabled = dis && !has; };
     if (r.type === "issue" || (r.kind !== "휴가" && r.kind !== "조퇴")) {
-      const has = !!r.texts?.[d.date];
-      const nb = h("button", { class: "note-btn" + (has ? " has" : ""), title: has ? r.texts[d.date] : "그날 한 일 쓰기", disabled: dis && !has, tabindex: -1 }, "✎");
+      nb = h("button", { class: "note-btn", tabindex: -1 }, "✎");
       nb.addEventListener("click", () => logModal(r, d.date, readonly || dis, again));
-      wrap.append(nb);
+      wrap.append(nb); markNote();
     }
     return { td: h("td", { class: "c " + (d.workday ? "" : "we ") + (d.today ? "today" : "") }, wrap), setTot: f => (rowTot = f) };
   };
@@ -693,11 +719,91 @@ async function renderWeek(box, uid, readonly, refreshAll) {
       h("span", {}, `조퇴 행에는 ${w.earlyHours}을 넣으면 그날 기준 시간이 ${w.dayHours - w.earlyHours}h가 됩니다`)));
 }
 
+// 0.7.5: 시간 칸 아래 "한 일 한 줄" — Enter 저장 · Esc 건너뛰기 (둘 다 원래 가려던 칸으로) · 칸 밖을 누르면 적은 것이 있을 때만 저장
+function noteInline(inp, r, date, hours, done) {
+  document.querySelectorAll(".note-inl").forEach(e => e.remove());
+  const next = document.activeElement !== inp && document.activeElement?.matches?.(".week input.h") ? document.activeElement : null;
+  const rc = inp.getBoundingClientRect();
+  const ti = h("input", { class: "inp", maxlength: 500, placeholder: `${r.type === "issue" ? r.no + " " : ""}${r.title} — 오늘 한 일 한 줄`, autocomplete: "off" });
+  const box = h("div", { class: "note-inl" }, ti, h("div", { class: "muted small" }, "Enter = 저장 · Esc = 건너뛰기 · 길게 쓰려면 ✎"));
+  box.style.left = Math.max(8, Math.min(innerWidth - 340, rc.left + scrollX - 20)) + "px"; box.style.top = (rc.bottom + scrollY + 4) + "px";
+  document.body.append(box);
+  let fin = false;
+  const end = async save => {
+    if (fin) return; fin = true;
+    const t = ti.value.trim();
+    if (save && t) { try { await api("PUT", "/api/hours", { type: r.type, id: r.id, date, hours, text: t }); done(t); toast("한 일을 저장했습니다"); } catch (e) { toast(e.message, true); } }
+    box.remove(); (next || inp).focus();
+  };
+  ti.addEventListener("keydown", e => { if (e.isComposing) return; if (e.key === "Enter") { e.preventDefault(); end(true); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(false); } });
+  ti.addEventListener("blur", () => setTimeout(() => { if (!fin && document.activeElement !== ti) end(true); }, 150));
+  ti.focus();
+}
+// 0.7.5: 날짜를 누르면 그날 한 일 (이슈 → 업무 → 기본 행) · ◀ ▶ · ← → 로 앞뒤 날짜 (불러온 기간 안)
+const logRows = w => [...w.rows.filter(r => r.type === "issue"), ...w.rows.filter(r => r.type === "task" && !r.fixed), ...w.rows.filter(r => r.type === "task" && r.fixed)];
+const rowLabel = r => r.type === "issue" ? [h("b", {}, r.no + " "), r.title] : r.title;
+const kindLabel = r => r.type === "issue" ? "이슈" : r.fixed ? "기본" : "업무";
+const noteCell = (r, d) => r.texts?.[d] ? h("div", { class: "pre" }, r.texts[d]) : h("div", { class: "none", title: "한 일을 적지 않아 업무 제목을 보여 줍니다" }, r.title);
+const whoName = uid => (M.users.find(u => u.id === uid)?.name || "").trim();
+function dayLog(w, date, uid) {
+  const days = w.days.map(d => d.date); let k = days.indexOf(date);
+  const body = h("div", { class: "log-pop" });
+  let setTitle = () => {};
+  const draw = () => {
+    const d = days[k];
+    const rows = logRows(w).filter(r => r.hours[d] || r.texts?.[d]);
+    const tot = rows.reduce((a, r) => a + (r.kind === "휴가" || r.kind === "조퇴" ? 0 : (r.hours[d] || 0)), 0);
+    setTitle(`${whoName(uid)} · ${dd(d)} 한 일 · 합계 ${fmtH(tot)}h`);
+    body.replaceChildren(
+      h("div", { class: "muted small", style: "margin-bottom:8px" }, "시간 입력 표에서 ✎로 적은 내용을 그대로 보여 줍니다. 안 적은 줄은 업무 제목을 흐리게 보여 줍니다."),
+      rows.length ? h("div", { class: "lg lg4" }, ["구분", "업무 · 이슈", "시간", "한 일"].map(x => h("div", { class: "lh" }, x)),
+        rows.flatMap(r => [h("div", { class: "lk" }, kindLabel(r)), h("div", {}, rowLabel(r)), h("div", { class: "n" }, r.hours[d] ? fmtH(r.hours[d]) + "h" : "-"), noteCell(r, d)]))
+        : h("div", { class: "muted", style: "padding:14px 4px" }, "이날 넣은 시간이 없습니다."));
+    prev.disabled = k <= 0; next.disabled = k >= days.length - 1;
+    prev.textContent = k > 0 ? `◀ ${dd(days[k - 1])}` : "◀"; next.textContent = k < days.length - 1 ? `${dd(days[k + 1])} ▶` : "▶";
+  };
+  const prev = h("button", { class: "btn", onclick: () => { if (k > 0) { k--; draw(); } } }), next = h("button", { class: "btn", onclick: () => { if (k < days.length - 1) { k++; draw(); } } });
+  const key = e => { if (e.target.closest?.("input,textarea") ) return; if (e.key === "ArrowLeft") prev.click(); else if (e.key === "ArrowRight") next.click(); };
+  const ttl = h("span", {});
+  setTitle = t => (ttl.textContent = t);
+  body.append();
+  const close = modal(ttl, h("div", {}, body, h("div", { class: "row", style: "margin-top:10px;gap:6px" }, prev, next, h("span", { class: "muted small" }, "← → 키로도 넘깁니다"))), [], { cls: "wide", noDirty: true, onClose: () => document.removeEventListener("keydown", key) });
+  document.addEventListener("keydown", key);
+  draw();
+}
+// 0.7.5: [주간 · 월간 한 일 보기] — 업무 · 이슈마다 제목 + 합계, 그 아래 날짜 · 시간 · 한 일 · [전체] [이슈] [업무] · ◀ ▶ 로 앞뒤 주(달)
+async function periodLog(uid, from, mon) {
+  let cur = from, flt = "all", w = null;
+  const ttl = h("span", {}), body = h("div", { class: "log-pop" });
+  const seg = h("div", { class: "seg" }, [["all", "전체"], ["issue", "이슈"], ["task", "업무"]].map(([k, t]) => h("button", { "data-k": k, class: k === flt ? "on" : "", onclick: () => { flt = k; seg.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.k === k)); draw(); } }, t)));
+  const load = async () => { w = await api("GET", `/api/week?user=${uid}&from=${cur}${mon ? "&mode=month" : ""}`); draw(); };
+  const shift = n => { if (mon) { const d = new Date(w.from + "T00:00:00Z"); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + n); cur = d.toISOString().slice(0, 10); } else cur = addDays(w.from, 7 * n); load().catch(e => toast(e.message, true)); };
+  const draw = () => {
+    const ds = w.days.map(d => d.date);
+    const rows = logRows(w).filter(r => (flt === "all" || r.type === flt) && ds.some(d => r.hours[d] || r.texts?.[d]));
+    const work = logRows(w).filter(r => r.kind !== "휴가" && r.kind !== "조퇴");
+    const tot = work.reduce((a, r) => a + ds.reduce((b, d) => b + (r.hours[d] || 0), 0), 0);
+    ttl.textContent = `${whoName(uid)} · ${mon ? `${w.from.slice(0, 4)}년 ${Number(w.from.slice(5, 7))}월` : `${dd(w.from)} ~ ${dd(w.to)}`} 한 일 · 합계 ${fmtH(tot)}h`;
+    body.replaceChildren(rows.length ? h("div", { class: "lg lg3" }, ["날짜", "시간", "한 일"].map(x => h("div", { class: "lh" }, x)),
+      rows.flatMap(r => {
+        const sum = ds.reduce((b, d) => b + (r.hours[d] || 0), 0);
+        return [h("div", { class: "lgp" }, h("span", { class: "lk" }, kindLabel(r)), " ", rowLabel(r)), h("div", { class: "lgp n" }, fmtH(sum) + "h"), h("div", { class: "lgp" }, ""),
+          ...ds.filter(d => r.hours[d] || r.texts?.[d]).flatMap(d => [h("div", { class: "ld" }, dd(d)), h("div", { class: "n" }, r.hours[d] ? fmtH(r.hours[d]) + "h" : "-"), noteCell(r, d)])];
+      })) : h("div", { class: "muted", style: "padding:14px 4px" }, `이 ${mon ? "달" : "주"}에 넣은 시간이 없습니다.`));
+  };
+  const key = e => { if (e.target.closest?.("input,textarea")) return; if (e.key === "ArrowLeft") shift(-1); else if (e.key === "ArrowRight") shift(1); };
+  modal(ttl, h("div", {}, h("div", { class: "row", style: "margin-bottom:8px;gap:8px" }, seg, h("div", { class: "spacer" }), h("span", { class: "muted small" }, "안 적은 줄은 업무 제목을 흐리게 보여 줍니다")), body,
+    h("div", { class: "row", style: "margin-top:10px;gap:6px" }, h("button", { class: "btn", onclick: () => shift(-1) }, mon ? "◀ 이전 달" : "◀ 이전 주"), h("button", { class: "btn", onclick: () => shift(1) }, mon ? "다음 달 ▶" : "다음 주 ▶"), h("span", { class: "muted small" }, "← → 키로도 넘깁니다"))),
+    [], { cls: "wide", noDirty: true, onClose: () => document.removeEventListener("keydown", key) });
+  document.addEventListener("keydown", key);
+  await load();
+}
 function logModal(r, date, readonly, after) {
   const hrs = h("input", { class: "inp", inputmode: "decimal", value: r.hours[date] ? String(r.hours[date]) : "", disabled: readonly, style: "width:100px" });
   const isIssue = r.type === "issue";
   const txt = h("textarea", { class: "inp", rows: 5, disabled: readonly, placeholder: isIssue ? "이 이슈에서 오늘 한 일 (예: 불량품 3EA 재현 시험, 원인 후보 2건 확인)" : "이 업무에서 그날 한 일 (예: 전원부 회로도 1차 검토, 부품 2종 변경 검토)" }, r.texts?.[date] || "");
-  modal(`${isIssue ? r.no + " " : ""}${r.title} · ${dd(date)}`, h("div", { class: "form" }, r.duty ? field("할 일 (PL 지정)", h("div", { class: "pre small" }, r.duty)) : "", ...field("투입 시간(h)", hrs), ...field("한 일", txt, false)),
+  modal(`${isIssue ? r.no + " " : ""}${r.title} · ${dd(date)}`, h("div", { class: "form" }, r.duty ? field("할 일 (PL 지정)", h("div", { class: "pre small" }, r.duty)) : "", ...field("투입 시간(h)", hrs), ...field("한 일", txt, false),
+      readonly ? "" : h("div", { class: "full muted small" }, "적은 내용은 팀장 · PL이 사람별 화면에서 봅니다 (안 적으면 업무 제목만 보입니다)")),
     readonly ? [] : [{ text: "저장", cls: "pri", fn: async () => { await api("PUT", "/api/hours", { type: isIssue ? "issue" : "task", id: r.id, date, hours: hrs.value.trim() === "" ? 0 : Number(hrs.value), text: txt.value }); toast("저장했습니다"); await after(); } }]);
   setTimeout(() => txt.focus(), 50);
 }
@@ -1008,7 +1114,7 @@ function pptDialog(i) {
     const cd = r.headers.get("content-disposition") || ""; const m = cd.match(/filename\*=UTF-8''([^;]+)/);
     const a = h("a", { href: URL.createObjectURL(blob), download: m ? decodeURIComponent(m[1]) : `${i.no}.pptx` }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     toast("PPT를 내려받았습니다");
-  } }], { cls: "ppt" });
+  } }], { cls: "ppt", noDirty: true });
 }
 // 0.6.0: 이슈 창 — 왼쪽 이슈 정보(번호 ~ 부2 · 첨부 이미지), 오른쪽 진행 현황 4칸
 async function issueBoard(i0, after) {

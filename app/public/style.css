@@ -684,3 +684,32 @@ html[data-dark="1"] .modal-bg.modeless .modal{box-shadow:0 12px 48px #000c}
 .tpl-del{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
 .tpl-del-it{font-size:13px;color:var(--muted);text-decoration:line-through}
 .tpl-del-it .link2{text-decoration:none}
+/* ── 0.7.5 ── */
+/* 날짜 · 하루 합계 누르면 그날 한 일 */
+.week thead th.day-lnk{cursor:pointer}
+.week thead th.day-lnk:hover{color:var(--navy2);text-decoration:underline dotted 1px;text-underline-offset:3px}
+.week thead tr.sum td.day-lnk{cursor:pointer}
+.week thead tr.sum td.day-lnk:hover{box-shadow:inset 0 0 0 2px var(--navy2)}
+/* 시간은 있는데 한 일이 없으면 ✎ 주황 */
+.note-btn.miss{color:#fff;background:#f08c00;border-color:#f08c00;opacity:1}
+.note-btn.miss:disabled{opacity:1}
+html[data-dark="1"] .note-btn.miss{background:#d9480f;border-color:#d9480f}
+/* 시간 칸 아래 한 줄 입력 */
+.note-inl{position:absolute;z-index:90;background:var(--card);border:2px solid var(--navy2);border-radius:8px;padding:6px;box-shadow:0 6px 18px #0003;width:320px}
+.note-inl .inp{width:100%;box-sizing:border-box}
+.note-inl .muted{font-size:11px;margin-top:4px}
+/* 한 일 팝업 (날짜 · 주간 / 월간) */
+.log-pop{max-height:62vh;overflow:auto}
+.lg{display:grid;border-top:1px solid var(--line)}
+.lg4{grid-template-columns:auto minmax(220px,34%) auto 1fr}
+.lg3{grid-template-columns:auto auto 1fr}
+.lg>div{border-bottom:1px solid var(--line);padding:7px 10px;font-size:13px;min-width:0}
+.lg>.lh{background:var(--soft,#eef1f6);font-weight:600;white-space:nowrap;position:sticky;top:0;z-index:1}
+.lg>.n{text-align:right;font-weight:600;white-space:nowrap}
+.lg>.lk,.lg .lk{color:var(--muted);white-space:nowrap}
+.lg>.ld{white-space:nowrap;padding-left:22px;color:var(--muted)}
+.lg>.none{color:var(--muted);font-style:italic}
+.lg>.pre{white-space:pre-wrap}
+.lg>.lgp{background:var(--soft,#f6f8fb);font-weight:600}
+.lg>.lgp .lk{font-weight:400;font-size:12px;margin-right:2px}
+html[data-dark="1"] .lg>.lh,html[data-dark="1"] .lg>.lgp{background:#1d2230}

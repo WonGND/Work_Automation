@@ -53,7 +53,7 @@ def png(w, h):
     rows = b"".join(b"\x00" + b"\x80\x80\x80" * w for _ in range(h))
     ch = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
     return b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + ch(b"IDAT", zlib.compress(rows)) + ch(b"IEND", b"")
-check("버전 0.7.4", urllib.request.urlopen(BASE + "/version").read().decode() == "업무관리 0.7.4")
+check("버전 0.7.4 이상", urllib.request.urlopen(BASE + "/version").read().decode() >= "업무관리 0.7.4")
 st, iss = pl.req("POST", "/api/issues", {"model_id": model["id"], "title": "0.7.4 대시 시험", "members": [{"role": "정", "user_id": mem2_u["id"]}],
   "items": {"1-1": "-", "1-2": "첫 줄\n-\n둘째 줄", "1-3": " - ", "2-1": "–", "3-1": "개선안", "4-1": "."}, "status_text": "-", "cause": "예전 원인 글"})
 iid = iss["id"]
