@@ -508,6 +508,21 @@ function pagePw() {
       c.addEventListener("change", () => { setPref("noteInline", c.checked); toast(c.checked ? "켰습니다" : "껐습니다"); });
       return h("label", { class: "chk" }, c, " 시간을 넣으면 바로 '한 일 한 줄' 입력 칸 띄우기");
     })(), h("div", { class: "muted small", style: "margin-top:6px" }, "끄면 ✎를 눌러서만 한 일을 씁니다. 시간은 있는데 한 일이 없는 칸은 ✎가 주황으로 보입니다."))] : []),
+    ...(M.shareUnc && !M.user.must_change ? [h("h2", {}, "폴더 바로 열기"), h("div", { class: "card", style: "max-width:560px" },
+      h("div", { class: "small" }, "이슈 번호 옆 📁 를 누르면 탐색기에서 그 이슈 폴더가 바로 열리게 합니다. ", h("b", {}, "PC마다 한 번"), " 설치합니다 (관리자 권한 필요 없음)."),
+      h("ol", { class: "small", style: "margin:8px 0 8px 18px;padding:0;line-height:1.7" },
+        h("li", {}, "[설치 파일 받기] → 받은 zip 을 오른쪽 클릭 → ", h("b", {}, "모두 압축 풀기")),
+        h("li", {}, h("b", {}, "install.cmd"), " 더블클릭 ('Windows의 PC 보호' 창이 뜨면 [추가 정보] → [실행])"),
+        h("li", {}, "아래 '이 PC에 설치했습니다' 체크"),
+        h("li", {}, "이슈 번호 옆 📁 클릭 → 처음 한 번 '열까요?' 창에서 ", h("b", {}, "항상 허용"), " 체크 후 [열기]")),
+      h("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
+        h("button", { class: "btn", onclick: async () => {
+          const r = await fetch("/api/folder-tool", { headers: { "x-req": "1" } }); if (!r.ok) return toast((await r.json().catch(() => ({}))).error || "받을 수 없습니다", true);
+          const a = h("a", { href: URL.createObjectURL(await r.blob()), download: "workfolder-setup.zip" }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        } }, "설치 파일 받기"),
+        (() => { const c = h("input", { type: "checkbox", checked: folderDirect() }); c.addEventListener("change", () => { folderDirect(c.checked); toast(c.checked ? "📁 를 누르면 폴더를 바로 엽니다 (이 PC)" : "📁 를 누르면 경로를 복사합니다"); });
+          return h("label", { class: "chk" }, c, " 이 PC에 설치했습니다"); })()),
+      h("div", { class: "muted small", style: "margin-top:6px" }, "체크는 이 PC · 이 브라우저에만 적용됩니다. 설치하지 않은 PC에서는 지금처럼 경로가 복사됩니다. 지우려면 압축을 푼 폴더의 uninstall.cmd."))] : []),
     h("h2", {}, "비밀번호 바꾸기"),
     M.user.must_change ? h("div", { class: "help" }, "처음 로그인입니다. 받은 비밀번호를 새 비밀번호(6자 이상)로 바꾼 뒤 사용합니다.") : "",
     h("div", { class: "card", style: "max-width:460px" }, h("div", { class: "form" }, ...field("지금 비밀번호", o), ...field("새 비밀번호", n1), ...field("새 비밀번호 확인", n2)),
@@ -1617,17 +1632,26 @@ function folderPath(i) { return i?.folder && M.shareUnc ? M.shareUnc + "\\" + St
 function noLink(i, tag = "span", cls = "") {
   const pth = folderPath(i);
   if (!pth) return h(tag, { class: cls }, i.no);
-  return h(tag, { class: (cls + " no-lnk").trim(), role: "button", tabindex: "0", title: "눌러서 폴더 경로 복사\n" + pth, onclick: e => { e.stopPropagation(); copyFolder(i); } }, i.no, h("span", { class: "fd" }, "📁"));
+  return h(tag, { class: (cls + " no-lnk").trim(), role: "button", tabindex: "0", title: (folderDirect() ? "눌러서 폴더 열기\n" : "눌러서 폴더 경로 복사\n") + pth, onclick: e => { e.stopPropagation(); copyFolder(i); } }, i.no, h("span", { class: "fd" }, "📁"));
 }
+// 0.7.9: 이 PC에 '폴더 바로 열기'를 설치했는지 (PC마다 다르므로 서버가 아니라 이 브라우저에 저장)
+//   관리 > 이슈 폴더에서 'IT가 모든 PC에 배포함'을 켜면, 이 PC에서 따로 끄지 않은 한 바로 열기가 기본
+function folderDirect(v) { try { if (v === undefined) { const x = localStorage.getItem("wm_folder_direct"); return x === null ? M.settings?.folder_direct_all === "1" : x === "1"; } localStorage.setItem("wm_folder_direct", v ? "1" : "0"); } catch { return v === undefined ? M.settings?.folder_direct_all === "1" : false; } }
 async function copyFolder(i) {
   const pth = folderPath(i);
+  if (folderDirect()) {   // workfolder: 링크 → PC에 설치한 처리기가 탐색기로 엶
+    const a = h("a", { href: "workfolder:" + encodeURIComponent(String(i.folder)), style: "display:none" }); document.body.append(a); a.click(); a.remove();
+    toast(`${i.no} 폴더를 여는 중… (안 열리면 내 정보 > 폴더 바로 열기 확인)`);
+    return;
+  }
   let ok = true;
   try { await navigator.clipboard.writeText(pth); } catch { const t = h("textarea", { style: "position:fixed;opacity:0" }); t.value = pth; document.body.append(t); t.select(); try { ok = document.execCommand("copy"); } catch { ok = false; } t.remove(); }
   modal(`${i.no} 폴더`, h("div", { class: "fold-pop" },
     h("div", { class: "fpath", title: "끌어서 선택해 복사할 수도 있습니다" }, pth),
     ok ? h("div", { class: "help" }, "경로를 복사했습니다. 키보드에서 ", h("b", {}, "Win + R"), " → ", h("b", {}, "Ctrl + V"), " → ", h("b", {}, "Enter"), " 를 누르면 탐색기에서 이 폴더가 열립니다.")
        : h("div", { class: "help" }, "복사가 막혔습니다. 위 경로를 끌어서 선택해 복사하세요."),
-    h("div", { class: "muted small" }, "탐색기 주소창(Ctrl + L)에 붙여 넣어도 됩니다.")), [{ text: "확인", cls: "pri" }]);
+    h("div", { class: "muted small" }, "탐색기 주소창(Ctrl + L)에 붙여 넣어도 됩니다."),
+    h("div", { class: "muted small" }, "누르자마자 폴더가 열리게 하려면: 오른쪽 위 내 정보 > '폴더 바로 열기'를 한 번 설치하세요.")), [{ text: "확인", cls: "pri" }]);
 }
 async function pageAdmin() {
   const tab = sessionStorage.getItem("atab") || "u";
@@ -1691,6 +1715,9 @@ async function pageAdmin() {
         h("button", { class: "btn", onclick: async () => { v = await api("PUT", "/api/master/share", { unc: unc.value }); unc.value = v.unc; M.shareUnc = v.unc; toast("저장했습니다"); draw(); } }, "경로 저장"),
         h("button", { class: "btn", onclick: async () => { const r = await api("POST", "/api/master/share/test"); r.ok ? toast("'_연결시험' 폴더를 만들었습니다. 파일 서버에서 확인한 뒤 직접 지워 주세요") : toast(r.why, true); } }, "연결 시험"),
         h("button", { class: "btn pri", onclick: async () => { const r = await api("POST", "/api/master/share/sync"); if (!r.ok) return toast(r.why, true); v = r.view; draw(r.results.filter(x => x.result !== "있음")); } }, "지금 맞추기")),
+      (() => { const c = h("input", { type: "checkbox", checked: M.settings?.folder_direct_all === "1" });
+        c.addEventListener("change", async () => { await api("PUT", "/api/master/share", { unc: unc.value, direct_all: c.checked }); M.settings.folder_direct_all = c.checked ? "1" : "0"; toast(c.checked ? "모든 사람: 📁 를 누르면 바로 열기 (각자 내 정보에서 끌 수 있음)" : "각자 내 정보에서 설치 · 체크한 PC만 바로 열기"); });
+        return h("label", { class: "chk", style: "margin-top:10px;display:block" }, c, " IT가 '폴더 바로 열기'를 모든 PC에 배포함 — 📁 를 누르면 기본으로 폴더를 바로 엽니다"); })(),
       h("div", { class: "help", style: "margin-top:6px" }, "[지금 맞추기]: 폴더가 없는 이슈는 만들고, 맨 위에 번호만으로 있는 예전 폴더(예: 26-012)는 모델 폴더 안으로 옮기며 이름을 바꿉니다. 업무관리를 켤 때와 30분마다 자동으로도 합니다. 이슈명 · 모델을 나중에 바꿔도 폴더 이름은 그대로 둡니다."),
       out));
     draw();

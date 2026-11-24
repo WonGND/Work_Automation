@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { buildPptx, pptName, type PptIssue } from "./pptx";
 import { PPT_TPL } from "./ppt_tpl";
-import { syncFolders, testShare, shareView, shareUnc } from "./share";   // 0.7.6: 이슈 폴더   // 0.7.3: 연구소 표준용지 (tools/mk_ppt_tpl.py 가 만듦)
+import { syncFolders, testShare, shareView, shareUnc } from "./share";
+import { folderToolZip } from "./foldertool";   // 0.7.9: 폴더 바로 열기 설치 묶음   // 0.7.6: 이슈 폴더   // 0.7.3: 연구소 표준용지 (tools/mk_ppt_tpl.py 가 만듦)
 
 export class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 const err = (s: number, m: string) => { throw new HttpError(s, m); };
@@ -730,6 +731,11 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     err(400, "종류 오류");
   }
 
+  // ── 0.7.9: '폴더 바로 열기' 설치 묶음 (로그인한 사람 누구나 · 지금 설정된 이슈 폴더 경로로 만듦) ──
+  if (p === "/api/folder-tool" && m === "GET") {
+    const unc = shareUnc(); if (!unc) err(404, "이슈 폴더 경로가 아직 설정되지 않았습니다 (관리 > 이슈 폴더)");
+    return new Response(folderToolZip(unc), { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="workfolder-setup.zip"`, "cache-control": "no-store" } });
+  }
   // ── 0.7.6: 이슈 폴더 (관리) ──
   if (p.startsWith("/api/master/share")) {
     if (!isAdmin(me)) err(403, "팀장 · 마스터만");
@@ -737,7 +743,9 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     if (p === "/api/master/share" && m === "PUT") {
       const u = str(body.unc, 300).replace(/\//g, "\\");
       if (u && !/^\\\\[^\\]+\\[^\\]+/.test(u)) err(400, "\\\\서버\\폴더 형태로 입력하세요");
-      setSetting("share_unc", u); audit(me.id, "이슈 폴더", "경로", { 경로: u }); return json(await shareView());
+      setSetting("share_unc", u);
+      if (typeof body.direct_all === "boolean") setSetting("folder_direct_all", body.direct_all ? "1" : "0");   // 0.7.9: IT 일괄 배포 여부
+      audit(me.id, "이슈 폴더", "경로", { 경로: u, ...(typeof body.direct_all === "boolean" ? { 모든PC배포: body.direct_all } : {}) }); return json(await shareView());
     }
     if (p === "/api/master/share/test" && m === "POST") return json(await testShare(me.id));
     if (p === "/api/master/share/sync" && m === "POST") { const r = await syncFolders(me.id, undefined, true); return json({ ...r, view: await shareView() }); }
