@@ -2,7 +2,7 @@
 # 이 파일 옆에 data · keys 폴더를 만들어 둡니다 (data = DB · 백업, keys = 암호화 열쇠 · 인증서)
 services:
   workmgmt:
-    image: workmgmt:0.7.1          # tools/mk_image.py 로 만든 이미지 (docker load -i workmgmt-0.7.1.tar)
+    image: workmgmt:0.7.6          # tools/mk_image.py 로 만든 이미지 (docker load -i workmgmt-0.7.6.tar)
     container_name: workmgmt
     restart: unless-stopped
     ports:
@@ -10,6 +10,8 @@ services:
       - "8000:8000"                # HTTP → HTTPS 로 넘김
     environment:
       - WL_CERT_HOSTS=192.168.0.10 # 접속에 쓰는 서버 주소 (인증서에 들어감) — 실제 주소로 바꾸기
+      - 'WL_SHARE_UNC=\\fileserver\share\issues'   # (선택) 이슈 폴더: 팀원 PC에서 여는 파일 서버 경로
     volumes:
       - ./data:/data
       - ./keys:/keys
+      - ./share:/share             # (선택) 이슈 폴더: 파일 서버 폴더를 NAS에서 마운트해 둔 곳

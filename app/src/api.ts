@@ -8,7 +8,8 @@ import { missReminder } from "./remind";
 import { join } from "node:path";
 import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { buildPptx, pptName, type PptIssue } from "./pptx";
-import { PPT_TPL } from "./ppt_tpl";   // 0.7.3: 연구소 표준용지 (tools/mk_ppt_tpl.py 가 만듦)
+import { PPT_TPL } from "./ppt_tpl";
+import { syncFolders, testShare, shareView, shareUnc } from "./share";   // 0.7.6: 이슈 폴더   // 0.7.3: 연구소 표준용지 (tools/mk_ppt_tpl.py 가 만듦)
 
 export class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 const err = (s: number, m: string) => { throw new HttpError(s, m); };
@@ -63,7 +64,7 @@ function meta(u: User) {
     reqPending: q1("SELECT COUNT(*) n FROM requests WHERE to_id=? AND status='대기' AND hidden_to=0", u.id)?.n || 0,
     dots: dotCount(u.id),
     prefs: Object.fromEntries(q("SELECT key,value FROM user_prefs WHERE user_id=?", u.id).map((r: any) => [r.key, r.value])),
-    issueTpl: tplView(),
+    issueTpl: tplView(), shareUnc: shareUnc(),
     users, models: q("SELECT * FROM models ORDER BY ord,id"), parts: q("SELECT name FROM parts ORDER BY ord").map((p: any) => p.name),
     grades: q("SELECT * FROM grades ORDER BY ord"), categories: q("SELECT * FROM categories ORDER BY ord"),
     stages: JSON.parse(getSetting("stage_names", "[]")), stagePct: JSON.parse(getSetting("stage_pct", "[]")),
@@ -729,6 +730,20 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     err(400, "종류 오류");
   }
 
+  // ── 0.7.6: 이슈 폴더 (관리) ──
+  if (p.startsWith("/api/master/share")) {
+    if (!isAdmin(me)) err(403, "팀장 · 마스터만");
+    if (p === "/api/master/share" && m === "GET") return json(shareView());
+    if (p === "/api/master/share" && m === "PUT") {
+      const u = str(body.unc, 300).replace(/\//g, "\\");
+      if (u && !/^\\\\[^\\]+\\[^\\]+/.test(u)) err(400, "\\\\서버\\폴더 형태로 입력하세요");
+      setSetting("share_unc", u); audit(me.id, "이슈 폴더", "경로", { 경로: u }); return json(shareView());
+    }
+    if (p === "/api/master/share/test" && m === "POST") return json(testShare(me.id));
+    if (p === "/api/master/share/sync" && m === "POST") { const r = syncFolders(me.id); return json({ ...r, view: shareView() }); }
+    err(404, "없는 주소");
+  }
+
   // ── 이슈 ──
   if (p === "/api/issues" && m === "GET") {
     const scope = url.searchParams.get("scope") || "mine"; const c = ctx();
@@ -763,6 +778,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       setMembers(id, body.members || [], !!body.confirm_pl, me);
     })();
     audit(me.id, "이슈 등록", no, body);
+    try { syncFolders(me.id, [id]); } catch (e) { console.error("이슈 폴더 만들기 실패", no, e); }   // 0.7.6: 연결 안 돼 있으면 아무것도 안 함
     return json(issueRow(q1("SELECT * FROM issues WHERE id=?", id)));
   }
   mt = p.match(/^\/api\/issues\/(\d+)(\/me|\/hide|\/image|\/pptx)?$/);

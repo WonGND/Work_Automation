@@ -937,7 +937,7 @@ function issueCard(i) {
   const logToday = e => { e.stopPropagation(); logModal({ type: "issue", id: i.id, no: i.no, title: i.title, duty: my?.duty, hours: Object.fromEntries(mine.map(l => [l.date, l.hours])), texts: Object.fromEntries(mine.map(l => [l.date, l.text])) }, M.today, false, () => route()); };
   const card = h("div", { class: "issue-card" });
   const dotEl = i.mflag ? rdot("issue", i.id) : "";
-  const top = h("div", { class: "top" }, h("span", { class: "car" }, "▸"), dotEl, h("span", { class: "no" }, i.no), h("span", { class: "ttl" }, i.title), badge("role", my?.role), badge(i.sched.cls, i.sched.text), h("span", { class: "muted small" }, M.stages[(i.stage || 1) - 1] || ""),
+  const top = h("div", { class: "top" }, h("span", { class: "car" }, "▸"), dotEl, noLink(i, "span", "no"), h("span", { class: "ttl" }, i.title), badge("role", my?.role), badge(i.sched.cls, i.sched.text), h("span", { class: "muted small" }, M.stages[(i.stage || 1) - 1] || ""),
     i.needDelay ? badge("late", "지연 사유 미입력 (PL)") : "", h("div", { class: "spacer" }), h("span", { class: "muted small" }, `내 투입 ${fmtH(i.hours.find(x => x.user_id === M.user.id)?.h || 0)}h`),
     h("button", { class: "btn sm pri", onclick: logToday }, "오늘 한 일"));
   top.addEventListener("click", () => { card.classList.toggle("open"); if (dotEl && dotEl.isConnected) dotClear("issue", i.id); });
@@ -990,7 +990,7 @@ async function pageIssues(scope) {
     const rows = list.map(i => {
       const mem = r => nameTag(i.members.find(m => m.role === r)?.name || "");
       return h("tr", { class: "click" + (i.hidden ? " muted" : "") + (isDone(i) ? " is-done" : ""), onclick: () => issueModal(i, load) },
-        h("td", { class: "nowrap no" }, i.no), h("td", {}, i.model, h("div", { class: "sub2" }, i.part)), h("td", {}, i.source), h("td", { class: "ttl" }, i.title, i.hidden ? [" ", badge("warn", "삭제됨")] : "", i.plAssigned.length ? [" ", badge("warn", "PL 담당 → 재지정")] : ""),
+        noLink(i, "td", "nowrap no"), h("td", {}, i.model, h("div", { class: "sub2" }, i.part)), h("td", {}, i.source), h("td", { class: "ttl" }, i.title, i.hidden ? [" ", badge("warn", "삭제됨")] : "", i.plAssigned.length ? [" ", badge("warn", "PL 담당 → 재지정")] : ""),
         h("td", {}, mem("정")), h("td", {}, mem("부1")), h("td", {}, mem("부2")), h("td", { class: "nowrap" }, i.occurred || ""), h("td", { class: "nowrap" }, i.target || ""),
         h("td", { class: "c" }, isDone(i) ? badge("done", "완료") : badge(i.sched.cls, i.sched.text)), h("td", { class: "nowrap" }, M.stages[(i.stage || 1) - 1] || ""), h("td", { class: "pre status" }, nowCell(i)),
         h("td", { class: "pre" }, i.needDelay ? badge("late", "지연 사유 필요") : (i.delay_reason || "")),
@@ -1162,7 +1162,7 @@ async function issueBoard(i0, after) {
     can && has ? h("div", { class: "muted small", style: "margin-top:4px" }, "새 이미지를 끌어다 놓거나 Ctrl + V 로 바꿀 수 있습니다") : "", file);
   drawImg();
   const side = h("aside", { class: "iside" },
-    kv("번호", h("b", { class: "ino" }, i.no)), kv("모델", `${i.model || "-"}${i.part ? ` (${i.part})` : ""}`), kv("발생처", i.source || "-"), kv("이슈명", h("b", {}, i.title)),
+    kv("번호", h("b", { class: "ino" }, noLink(i))), kv("모델", `${i.model || "-"}${i.part ? ` (${i.part})` : ""}`), kv("발생처", i.source || "-"), kv("이슈명", h("b", {}, i.title)),
     ...["정", "부1", "부2"].map(r => { const m = i.members.find(x => x.role === r); return kv(r, m ? [nameTag(m.name), m.duty ? h("div", { class: "small muted pre" }, m.duty) : ""] : h("span", { class: "muted" }, "-")); }),
     kv("발생일", i.occurred || "-"), kv("Target", [i.target || "-", " ", badge(i.sched.cls, i.sched.text)]), kv("단계", `${M.stages[(i.stage || 1) - 1] || ""} · ${Math.round(i.progress * 100)}%`),
     i.delay_reason || i.needDelay ? kv("지연 사유", i.needDelay ? badge("late", "입력 필요") : h("div", { class: "pre small" }, i.delay_reason)) : "",
@@ -1182,7 +1182,7 @@ async function issueBoard(i0, after) {
     if (Object.keys(its).length) b.items = its;
     if (Object.keys(b).length) { const r = await api("PUT", `/api/issues/${i.id}`, b); for (const k in b) if (k !== "items") i[k] = b[k]; i.items = r.items || i.items; changed = true; toast("저장했습니다"); }
   } }] : [];
-  const close = modal([h("b", { class: "ino" }, i.no), h("span", {}, i.title), badge(i.sched.cls, i.sched.text), i.hidden ? badge("warn", "삭제됨") : "", h("span", { class: "muted small", style: "font-weight:400" }, can ? "진행 현황은 PL · 팀장 · 마스터가 씁니다" : "보기 전용")], body, btns,
+  const close = modal([h("b", { class: "ino" }, noLink(i)), h("span", {}, i.title), badge(i.sched.cls, i.sched.text), i.hidden ? badge("warn", "삭제됨") : "", h("span", { class: "muted small", style: "font-weight:400" }, can ? "진행 현황은 PL · 팀장 · 마스터가 씁니다" : "보기 전용")], body, btns,
     { cls: "wide board", noBgClose: can, beforeClose: async () => !dirty() || confirmBox("저장하지 않은 내용이 있습니다.\n저장하지 않고 닫을까요?"), onClose: () => { document.removeEventListener("paste", onPaste); if (changed) Promise.resolve(after?.()).catch(() => {}); } });
   // 0.7.2: 창 크기 — 처음엔 화면에 맞게 크게, 오른쪽 아래 모서리로 조절, 조절한 크기는 사람별로 기억
   const box = body.closest(".modal");
@@ -1466,7 +1466,7 @@ async function pageSummary() {
   const c = s.count;
   const open = s.issues.filter(i => !(i.done || i.stage === 6));
   const grp = (title, list, k) => [h("h2", { class: k ? "h-" + k : "" }, title, h("span", { class: "sub" }, list.length + "건")), h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["번호", "파트", "모델", "이슈명", "담당", "발생일", "Target", "일정", "단계", "현재 진행", "지연 사유"].map(x => h("th", {}, x)))),
-    h("tbody", {}, list.map(i => h("tr", { class: "click" + (k ? " r-" + k : ""), onclick: () => issueModal(i, pageSummary) }, h("td", {}, h("b", {}, i.no)), h("td", {}, i.part), h("td", {}, i.model), h("td", {}, i.title), h("td", { class: "small", title: i.members.map(m => `${m.role} ${m.name}`).join(" · ") }, ["정", "부1", "부2"].map(r => i.members.find(m => m.role === r)).filter(Boolean).map(m => String(m.name).split(" ")[0]).join(" · ")),
+    h("tbody", {}, list.map(i => h("tr", { class: "click" + (k ? " r-" + k : ""), onclick: () => issueModal(i, pageSummary) }, h("td", {}, h("b", {}, noLink(i))), h("td", {}, i.part), h("td", {}, i.model), h("td", {}, i.title), h("td", { class: "small", title: i.members.map(m => `${m.role} ${m.name}`).join(" · ") }, ["정", "부1", "부2"].map(r => i.members.find(m => m.role === r)).filter(Boolean).map(m => String(m.name).split(" ")[0]).join(" · ")),
       h("td", { class: "nowrap" }, i.occurred || ""), h("td", { class: "nowrap" }, i.target || ""), h("td", {}, badge(i.sched.cls, i.sched.text)), h("td", { class: "nowrap" }, M.stages[(i.stage || 1) - 1]), h("td", { class: "small pre status" }, nowCell(i)), h("td", { class: "small pre" }, i.needDelay ? badge("late", "필요") : i.delay_reason))))))];
   app().replaceChildren(h("h1", {}, "이슈 요약"),
     h("div", { class: "cards" }, [["진행", c.open], ["지연", c.late, "late"], ["임박", c.soon, "soon"], ["완료", c.done], ["지연 사유 미입력", c.needDelay, "late"]].map(([k, v, cl]) => h("div", { class: "card stat" + (cl && v ? " k-" + cl : "") }, h("div", { class: "k" }, k), h("div", { class: "v" }, v + "건")))),
@@ -1612,11 +1612,28 @@ async function pageMaster() {
 }
 
 // ── 관리 ──
+// 0.7.6: 이슈 폴더 — 번호를 누르면 파일 서버 폴더 경로를 복사 (브라우저 보안 때문에 사이트에서 폴더를 바로 열 수는 없음)
+function folderPath(i) { return i?.folder && M.shareUnc ? M.shareUnc + "\\" + String(i.folder).replace(/\//g, "\\") : ""; }
+function noLink(i, tag = "span", cls = "") {
+  const pth = folderPath(i);
+  if (!pth) return h(tag, { class: cls }, i.no);
+  return h(tag, { class: (cls + " no-lnk").trim(), role: "button", tabindex: "0", title: "눌러서 폴더 경로 복사\n" + pth, onclick: e => { e.stopPropagation(); copyFolder(i); } }, i.no, h("span", { class: "fd" }, "📁"));
+}
+async function copyFolder(i) {
+  const pth = folderPath(i);
+  let ok = true;
+  try { await navigator.clipboard.writeText(pth); } catch { const t = h("textarea", { style: "position:fixed;opacity:0" }); t.value = pth; document.body.append(t); t.select(); try { ok = document.execCommand("copy"); } catch { ok = false; } t.remove(); }
+  modal(`${i.no} 폴더`, h("div", { class: "fold-pop" },
+    h("div", { class: "fpath", title: "끌어서 선택해 복사할 수도 있습니다" }, pth),
+    ok ? h("div", { class: "help" }, "경로를 복사했습니다. 키보드에서 ", h("b", {}, "Win + R"), " → ", h("b", {}, "Ctrl + V"), " → ", h("b", {}, "Enter"), " 를 누르면 탐색기에서 이 폴더가 열립니다.")
+       : h("div", { class: "help" }, "복사가 막혔습니다. 위 경로를 끌어서 선택해 복사하세요."),
+    h("div", { class: "muted small" }, "탐색기 주소창(Ctrl + L)에 붙여 넣어도 됩니다.")), [{ text: "확인", cls: "pri" }]);
+}
 async function pageAdmin() {
   const tab = sessionStorage.getItem("atab") || "u";
   const T = (k, t) => h("button", { class: tab === k ? "on" : "", onclick: () => { sessionStorage.setItem("atab", k); pageAdmin(); } }, t);
   const body = h("div");
-  app().replaceChildren(h("h1", {}, "관리"), h("div", { class: "tabs" }, T("u", "계정"), M.perms.master ? T("imp", "엑셀 가져오기") : "", T("mail", "메일 설정"), T("b", "백업"), T("a", "변경 기록")), body);
+  app().replaceChildren(h("h1", {}, "관리"), h("div", { class: "tabs" }, T("u", "계정"), M.perms.master ? T("imp", "엑셀 가져오기") : "", T("mail", "메일 설정"), T("fold", "이슈 폴더"), T("b", "백업"), T("a", "변경 기록")), body);
   if (tab === "imp" && M.perms.master) {
     const f = h("input", { type: "file", accept: ".json,application/json" });
     const fromI = dateInput(""), toI = dateInput(""), webI = dateInput(M.settings.web_start || "2026-11-16");
@@ -1650,6 +1667,34 @@ async function pageAdmin() {
       h("div", { class: "card", style: "max-width:760px" }, h("div", { class: "form" }, ...field("가져오기 파일", f), ...field("반영할 기간", h("div", { class: "row" }, fromI, h("span", { class: "muted" }, "~"), toI)),
           ...field("웹 기준 시작일", h("div", { class: "row" }, webI, h("span", { class: "muted small" }, "이날부터는 웹 우선: 웹에 있는 시간은 그대로, 웹에 없을 때만 엑셀 값 · 이날 이후 웹에서 고친 업무 · 이슈 · 담당은 덮어쓰지 않음")))), info,
         h("div", { class: "row", style: "margin-top:12px" }, h("button", { class: "btn", onclick: () => go(true) }, "미리보기"), h("button", { class: "btn pri", onclick: () => go(false) }, "가져오기"))), out);
+  }
+  if (tab === "fold") {   // 0.7.6: 이슈 폴더 (파일 서버)
+    let v = await api("GET", "/api/master/share");
+    const unc = h("input", { class: "inp", value: v.unc, placeholder: "예: \\\\서버\\공유폴더\\이슈업무원본자료", style: "max-width:560px" });
+    const out = h("div");
+    const draw = (res) => {
+      out.replaceChildren(
+        h("div", { class: "card", style: "margin-top:10px" },
+          h("b", {}, v.ok ? "✔ 파일 서버 연결됨" : "✖ 연결 안 됨"), v.ok ? "" : h("div", { class: "small", style: "color:var(--bad,#c92a2a);margin-top:4px" }, v.why),
+          h("div", { class: "small", style: "margin-top:6px" }, `이슈 ${v.total}건 중 폴더 연결 ${v.linked}건` + (v.none.length ? ` · 폴더 없음 ${v.none.length}건 (${v.none.slice(0, 12).join(", ")}${v.none.length > 12 ? " …" : ""})` : "")),
+          v.pending.length ? h("div", { style: "margin-top:10px" }, h("b", {}, `손으로 옮겨 주세요 (${v.pending.length}) — 권한이 없어 시스템이 옮기지 못한 예전 폴더`),
+            h("table", { class: "tbl small", style: "margin-top:6px" }, h("thead", {}, h("tr", {}, h("th", {}, "번호"), h("th", {}, "지금"), h("th", {}, "바꿀 위치 · 이름"))),
+              h("tbody", {}, v.pending.map(x => h("tr", {}, h("td", {}, x.no), h("td", {}, x.from), h("td", {}, h("span", { class: "fpath" }, x.to.replace("/", " \\ "))))))),
+            h("div", { class: "help" }, "옮긴 뒤 [지금 맞추기]를 누르면 새 위치로 연결됩니다 (30분마다 자동으로도 확인).")) : "",
+          res ? h("div", { style: "margin-top:10px" }, h("b", {}, "방금 결과"), h("div", { class: "small" }, res.length ? res.map(x => `${x.no} ${x.result}${x.why ? ` (${x.why})` : ""}`).join(" · ") : "바뀐 것 없음")) : ""));
+    };
+    body.append(h("div", { class: "card" },
+      h("h2", {}, "이슈 폴더 (파일 서버)"),
+      h("div", { class: "help" }, "이슈를 등록하면 파일 서버에 ", h("b", {}, "모델 \\ 번호 이슈명"), " 폴더를 만듭니다. 이슈 번호를 누르면 그 폴더 경로가 복사됩니다. 시스템은 폴더를 만들기만 하고 파일은 읽지 · 지우지 않습니다."),
+      h("div", { class: "form" }, ...field("탐색기 경로", unc)), h("div", { class: "muted small", style: "margin-top:4px" }, "팀원 PC에서 여는 주소입니다 (번호를 눌렀을 때 복사되는 경로의 앞부분). 비우면 설치 때 넣은 값"),
+      h("div", { class: "row", style: "gap:6px;margin-top:8px;flex-wrap:wrap" },
+        h("button", { class: "btn", onclick: async () => { v = await api("PUT", "/api/master/share", { unc: unc.value }); unc.value = v.unc; M.shareUnc = v.unc; toast("저장했습니다"); draw(); } }, "경로 저장"),
+        h("button", { class: "btn", onclick: async () => { const r = await api("POST", "/api/master/share/test"); r.ok ? toast("'_연결시험' 폴더를 만들었습니다. 파일 서버에서 확인한 뒤 직접 지워 주세요") : toast(r.why, true); } }, "연결 시험"),
+        h("button", { class: "btn pri", onclick: async () => { const r = await api("POST", "/api/master/share/sync"); if (!r.ok) return toast(r.why, true); v = r.view; draw(r.results.filter(x => x.result !== "있음")); } }, "지금 맞추기")),
+      h("div", { class: "help", style: "margin-top:6px" }, "[지금 맞추기]: 폴더가 없는 이슈는 만들고, 맨 위에 번호만으로 있는 예전 폴더(예: 26-012)는 모델 폴더 안으로 옮기며 이름을 바꿉니다. 업무관리를 켤 때와 30분마다 자동으로도 합니다. 이슈명 · 모델을 나중에 바꿔도 폴더 이름은 그대로 둡니다."),
+      out));
+    draw();
+    return;
   }
   if (tab === "mail") {
     const c = await api("GET", "/api/admin/mail");

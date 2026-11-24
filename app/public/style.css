@@ -713,3 +713,11 @@ html[data-dark="1"] .note-btn.miss{background:#d9480f;border-color:#d9480f}
 .lg>.lgp{background:var(--soft,#f6f8fb);font-weight:600}
 .lg>.lgp .lk{font-weight:400;font-size:12px;margin-right:2px}
 html[data-dark="1"] .lg>.lh,html[data-dark="1"] .lg>.lgp{background:#1d2230}
+
+/* 0.7.6 이슈 폴더 */
+.no-lnk{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.no-lnk:hover{color:var(--pri,#1c7ed6)}
+.no-lnk .fd{font-size:.8em;margin-left:3px;text-decoration:none;display:inline-block;opacity:.75}
+.fpath{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;background:var(--bg2,#f1f3f5);border:1px solid var(--line,#dee2e6);border-radius:6px;padding:8px 10px;word-break:break-all;user-select:all}
+.fold-pop{width:min(600px,80vw);display:flex;flex-direction:column;gap:10px}
+html[data-dark="1"] .fpath{background:#1f2329;border-color:#3a3f47}

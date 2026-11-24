@@ -8,6 +8,7 @@
 import { openDb, q, q1, run, backup, getSetting, setSetting, notify, db } from "./db";
 import { importSeed, mergeSeed, ensureFixedRows } from "./seed";
 import { handle, HttpError, NET, setupNeeded, acctFiles } from "./api";
+import { syncFolders } from "./share";
 import { initSecret, enc, isEnc, randCode } from "./secret";
 import { ensureSelfSigned } from "./selfsign";
 import { missReminder } from "./remind";
@@ -21,7 +22,7 @@ import { GUIDE } from "./guide_img";
 import { FONT_CSS, FONTS } from "./fonts_kr";   // 0.7.2: Noto Sans KR (tools/mk_fonts.py 가 만듦)
 import { createHash } from "node:crypto";
 
-export const VERSION = "업무관리 0.7.5";
+export const VERSION = "업무관리 0.7.6";
 const args = process.argv.slice(2);
 const ENVK: Record<string, string> = { "--port": "WL_PORT", "--data": "WL_DATA", "--cert": "WL_TLS_CERT", "--key": "WL_TLS_KEY", "--http-port": "WL_HTTP_PORT", "--key-file": "WL_KEY_FILE", "--seed": "WL_SEED" };
 const arg = (k: string, d: string) => { const i = args.indexOf(k); if (i >= 0 && args[i + 1]) return args[i + 1]; const e = ENVK[k] && process.env[ENVK[k]]; return e || d; };
@@ -117,10 +118,14 @@ setInterval(dailyBackup, 30 * 60e3);
 // 미입력 알림: 근무일 아침 8시 이후 첫 확인 때 한 번 (10분마다 확인)
 const remind = () => { try { missReminder(); } catch (e) { console.error("미입력 알림 실패", e); } };
 remind(); setInterval(remind, 10 * 60e3);
+// 0.7.6: 이슈 폴더 맞추기 — 시작 10초 뒤 · 30분마다 (연결 안 돼 있으면 아무것도 안 함 · 손으로 옮긴 폴더도 다시 찾음)
+const folders = () => { try { const r = syncFolders(null); const ch = r.results.filter(x => x.result !== "있음"); if (ch.length) console.log("[이슈 폴더]", ch.map(x => `${x.no} ${x.result}`).join(" · ")); } catch (e) { console.error("이슈 폴더 맞추기 실패", e); } };
+setTimeout(folders, 10e3); setInterval(folders, 30 * 60e3);
 
 const CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'";
 // 버전이 바뀌면 모든 사람에게 알림 (우상단 🔔)
 const NOTES: Record<string, string> = {
+  "업무관리 0.7.6": "이슈 폴더: 이슈를 등록하면 파일 서버(이슈 자료 폴더)에 '모델 \\ 번호 이슈명' 폴더를 자동으로 만듦 · 이미 있는 이슈도 모두 만듦 · 번호만으로 만들어 둔 예전 폴더(예: 26-012)는 모델 폴더 안으로 옮기며 이름을 바꿈 (권한이 없으면 관리 > 이슈 폴더에 옮길 목록) · 이슈 번호를 누르면 폴더 경로 복사 (Win + R → Ctrl + V → Enter 로 열기) · 관리 > 이슈 폴더 (연결 상태 · 연결 시험 · 지금 맞추기 · 경로) · 시작할 때와 30분마다 자동으로 맞춤 · 파일 서버 연결이 끊기면 아무것도 만들지 않음",
   "업무관리 0.7.5": "시간 입력 표 날짜 머리글 · 하루 합계를 누르면 그날 한 일 팝업 (업무 · 이슈별 시간 + ✎ 내용, 안 적은 줄은 업무 제목 · ◀ ▶ · ← →) · [주간 한 일 보기] / [월간 한 일 보기] 팝업 (업무 · 이슈마다 합계 + 날짜별 시간 · 한 일, 전체 / 이슈 / 업무 거르기, 앞뒤 주 · 달) — 내 업무 · 사람별 · PL 일을 준 사람 화면 모두 · 시간을 넣고 칸을 나가면 바로 '한 일 한 줄' 입력 칸 (Enter 저장 · Esc 건너뛰기 · 내 정보에서 끄기) · 시간은 있는데 한 일이 없으면 ✎ 주황 · ✎ 창에 '팀장 · PL이 봅니다' 안내 · 공지 · 알림 팝업을 뺀 모든 창을 Esc 로 닫음 (쓴 내용이 있으면 '저장하지 않고 닫을까요?')",
   "업무관리 0.7.4": "PPT 내보내기: 항목 제목(1-1 등)과 그 내용의 글자 크기를 항상 1pt 차이로 (11.5/10.5 → 최소 9.5/8.5) · '-'처럼 기호만 적힌 항목 · 줄은 빠짐 (내보내기 창에도 '비어 있음') · 배포하지 않은 버전 공지 초안이 있으면 새 버전 내용을 그 초안 뒤에 이어 붙임 (고친 문구 유지)",
   "업무관리 0.7.3": "이슈 창 [PPT 내보내기]: 연구소 표준용지 한 장에 4칸 내용(+ 기본 정보 · 첨부 이미지 · 이전 기록)을 넣고 글자 수에 맞춰 배치 · 글자 크기를 바꿈 (최소 9pt, 그래도 넘치면 유첨 장), 넣을 항목을 고르고 사람마다 기억 · 기준정보 '이슈 템플릿' 탭(마스터 · 팀장): 4칸 제목 · 항목 이름 · 설명 · 순서를 고치고 항목 추가 · 지우기 · 살리기 (지운 항목에 써 둔 글은 '삭제된 항목'으로 남음) · 모든 창을 제목 줄로 끌어 옮김 · 이슈 등록 · 수정 창과 업무 창은 띄운 채로 뒤 목록을 보고 다른 이슈를 열 수 있음",
@@ -151,6 +156,7 @@ const NOTICE: [string, string[]][] = [
   ["업무관리 0.7.3", ["이슈 창 [PPT 내보내기] — 연구소 표준용지 한 장 (글이 많으면 글자를 줄이고, 그래도 넘치면 유첨 장)", "넣을 내용(기본 정보 · 이미지 · 칸 · 항목)을 고를 수 있고 고른 것은 기억", "기준정보 '이슈 템플릿' — 4칸 제목 · 항목을 마스터 · 팀장이 고침 (지운 항목의 글은 남음)", "모든 창을 제목 줄로 끌어 옮기기", "이슈 등록 · 수정 · 업무 창을 띄운 채로 뒤 목록 보기 · 다른 이슈 열어 보기"]],
   ["업무관리 0.7.4", ["PPT 항목 제목과 내용 글자 크기를 1pt 차이로 맞춤", "'-'만 적힌 항목은 PPT에서 자동으로 빠짐"]],
   ["업무관리 0.7.5", ["시간 입력 표의 날짜(또는 하루 합계)를 누르면 그날 한 일이 팝업으로", "[주간 한 일 보기] — 이번 주 업무 · 이슈별 시간과 한 일을 한 창에 (월간 보기에서는 월간)", "시간을 넣으면 바로 '한 일 한 줄' 입력 칸 (Enter 저장 · Esc 건너뛰기, 내 정보에서 끄기)", "시간은 있는데 한 일을 안 적은 칸은 ✎가 주황", "모든 창을 Esc 로 닫기 (공지 · 알림 제외, 쓴 내용이 있으면 확인)"]],
+  ["업무관리 0.7.6", ["이슈마다 파일 서버(이슈 자료 폴더)에 '모델 \\ 번호 이슈명' 폴더가 자동으로 생김 (새 이슈는 등록할 때)", "이슈 번호를 누르면 폴더 경로가 복사됨 → Win + R → Ctrl + V → Enter 로 폴더 열기"]],
 ];
 {
   const last = getSetting("last_version", "");
