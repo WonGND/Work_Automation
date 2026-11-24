@@ -23,6 +23,26 @@ const pem = (label: string, b: Buffer) => `-----BEGIN ${label}-----\n${b.toStrin
 const der = (p: string) => Buffer.from(p.replace(/-----[^-]+-----/g, "").replace(/\s+/g, ""), "base64");
 const ski = (spki: Buffer) => createHash("sha1").update(spki).digest();
 const crit = tlv(0x01, Buffer.from([0xff]));
+// 0.7.8: DER 에서 TLV 하나 읽기 (태그 1바이트 · 길이 최대 4바이트)
+function tlvAt(b: Buffer, off: number) {
+  let l = b[off + 1], h = 2;
+  if (l & 0x80) { const n = l & 0x7f; l = 0; for (let i = 0; i < n; i++) l = l * 256 + b[off + 2 + i]; h = 2 + n; }
+  return { tag: b[off], start: off, body: off + h, end: off + h + l };
+}
+// 0.7.8: CA 인증서의 '주체(subject)' 원본 바이트 — 서버 인증서의 '발급자'는 이것과 바이트까지 같아야 PC가 둘을 잇는다
+//   (예전 CA는 조직 이름이 'NEOVUE 회로팀 …'이라 이름을 다시 만들면 달라짐)
+export function caSubject(caCertPem: string): Buffer {
+  const d = der(caCertPem.split("-----END CERTIFICATE-----")[0] + "-----END CERTIFICATE-----");
+  const tbs = tlvAt(d, tlvAt(d, 0).body);
+  let o = tbs.body;
+  if (d[o] === 0xa0) o = tlvAt(d, o).end;         // version
+  o = tlvAt(d, o).end;                             // serial
+  o = tlvAt(d, o).end;                             // signature algorithm
+  o = tlvAt(d, o).end;                             // issuer
+  o = tlvAt(d, o).end;                             // validity
+  const sub = tlvAt(d, o);                         // subject
+  return d.subarray(sub.start, sub.end);
+}
 function cert(subject: Buffer, issuer: Buffer, spki: Buffer, signKey: KeyObject, days: number, exts: Buffer[]) {
   const sigAlg = seq(oid("1.2.840.10045.4.3.2"));
   const now = new Date(Date.now() - 3600e3), end = new Date(now.getTime() + days * 864e5);
@@ -50,7 +70,7 @@ export function makeServer(hosts: string[], caCertPem: string, caKeyPem: string)
   const caKey = createPrivateKey(caKeyPem);
   const caSpki = createPublicKey(caKey).export({ type: "spki", format: "der" }) as Buffer;
   const san = hosts.map(h => /^\d+\.\d+\.\d+\.\d+$/.test(h) ? tlv(0x87, Buffer.from(h.split(".").map(Number))) : tlv(0x82, Buffer.from(h)));
-  const c = cert(name(hosts[0]), name(CA_NAME), spki, caKey, 825, [
+  const c = cert(name(hosts[0]), caSubject(caCertPem), spki, caKey, 825, [
     seq(oid("2.5.29.17"), octet(seq(...san))),
     seq(oid("2.5.29.19"), crit, octet(seq())),
     seq(oid("2.5.29.15"), crit, octet(tlv(0x03, Buffer.from([0x07, 0x80])))),
@@ -71,7 +91,11 @@ export function ensureSelfSigned(dir: string, hosts: string[]) {
   }
   const want = hosts.join(",");
   let renew = !existsSync(sc) || !existsSync(sk) || !readFileSync(sc, "utf-8").trim() || (existsSync(sh) ? readFileSync(sh, "utf-8") : "") !== want;
-  if (!renew) { try { const x = new X509Certificate(readFileSync(sc, "utf-8")); renew = new Date(x.validTo).getTime() - Date.now() < 30 * 864e5; } catch { renew = true; } }
+  if (!renew) { try {
+    const x = new X509Certificate(readFileSync(sc, "utf-8")), ca = new X509Certificate(readFileSync(caC, "utf-8"));
+    renew = new Date(x.validTo).getTime() - Date.now() < 30 * 864e5
+      || x.issuer !== ca.subject || !x.checkIssued(ca) || !x.verify(ca.publicKey);   // 0.7.8: CA와 안 이어지는 서버 인증서는 새로 만듦
+  } catch { renew = true; } }
   if (renew) {
     const r = makeServer(hosts, readFileSync(caC, "utf-8"), readFileSync(caK, "utf-8"));
     writeFileSync(sc, r.cert); writeFileSync(sk, r.key, { mode: 0o600 }); writeFileSync(sh, want);

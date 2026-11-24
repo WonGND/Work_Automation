@@ -22,7 +22,7 @@ import { GUIDE } from "./guide_img";
 import { FONT_CSS, FONTS } from "./fonts_kr";   // 0.7.2: Noto Sans KR (tools/mk_fonts.py 가 만듦)
 import { createHash } from "node:crypto";
 
-export const VERSION = "업무관리 0.7.7";
+export const VERSION = "업무관리 0.7.8";
 const args = process.argv.slice(2);
 const ENVK: Record<string, string> = { "--port": "WL_PORT", "--data": "WL_DATA", "--cert": "WL_TLS_CERT", "--key": "WL_TLS_KEY", "--http-port": "WL_HTTP_PORT", "--key-file": "WL_KEY_FILE", "--seed": "WL_SEED" };
 const arg = (k: string, d: string) => { const i = args.indexOf(k); if (i >= 0 && args[i + 1]) return args[i + 1]; const e = ENVK[k] && process.env[ENVK[k]]; return e || d; };
@@ -33,7 +33,9 @@ let CERT = arg("--cert", ""), TKEY = arg("--key", ""), CA_CERT = "";
 // 자체 서명 인증서로 HTTPS (사내 인증서가 없을 때): --self-signed [--cert-hosts 192.168.0.10,nas이름]  /  WL_SELF_SIGNED=1 WL_CERT_HOSTS=…
 if (!CERT && flag("--self-signed", "WL_SELF_SIGNED")) {
   const ips = Object.values(networkInterfaces()).flat().filter((x: any) => x && x.family === "IPv4" && !x.internal).map((x: any) => x.address);
-  const hosts = Array.from(new Set([...(arg("--cert-hosts", process.env.WL_CERT_HOSTS || "").split(",").map(x => x.trim()).filter(Boolean)), ...ips, "localhost", "127.0.0.1"]));
+  // 0.7.8: 접속 주소(WL_CERT_HOSTS)를 정해 두면 컨테이너 내부 주소는 넣지 않음 — 다시 빌드해 내부 주소가 바뀌어도 서버 인증서를 새로 만들지 않게
+  const fixed = arg("--cert-hosts", process.env.WL_CERT_HOSTS || "").split(",").map(x => x.trim()).filter(Boolean);
+  const hosts = Array.from(new Set([...fixed, ...(fixed.length ? [] : ips), "localhost", "127.0.0.1"]));
   const r = ensureSelfSigned(dirname(arg("--key-file", join(exeDir, "비밀키", "secret.key"))), hosts);
   CERT = r.cert; TKEY = r.key; CA_CERT = r.ca;
 }
@@ -126,6 +128,7 @@ setTimeout(folders, 10e3); setInterval(folders, 30 * 60e3);
 const CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'";
 // 버전이 바뀌면 모든 사람에게 알림 (우상단 🔔)
 const NOTES: Record<string, string> = {
+  "업무관리 0.7.8": "HTTPS 인증서: 서버 인증서를 새로 만들 때 발급자 이름을 내부 인증 기관(CA) 인증서에서 그대로 가져옴 (예전 CA 이름과 달라 PC가 '신뢰할 수 없음'으로 보던 문제 고침) · 켤 때 CA와 이어지지 않는 서버 인증서는 자동으로 다시 만듦 · 접속 주소를 정해 두면 컨테이너 내부 주소는 인증서에 넣지 않아, 다시 빌드해도 서버 인증서가 바뀌지 않음",
   "업무관리 0.7.7": "이슈 폴더: 파일 서버가 느리거나 답하지 않을 때 사이트 전체가 멈추던 문제 고침 (파일 서버 작업을 기다리지 않고 따로 처리 · 작업마다 8초 제한 · 넘으면 그 회차를 멈추고 10분 뒤 다시) · 폴더 목록은 회차마다 한 번만 읽음 · 이슈 등록은 폴더를 기다리지 않고 바로 끝남",
   "업무관리 0.7.6": "이슈 폴더: 이슈를 등록하면 파일 서버(이슈 자료 폴더)에 '모델 \\ 번호 이슈명' 폴더를 자동으로 만듦 · 이미 있는 이슈도 모두 만듦 · 번호만으로 만들어 둔 예전 폴더(예: 26-012)는 모델 폴더 안으로 옮기며 이름을 바꿈 (권한이 없으면 관리 > 이슈 폴더에 옮길 목록) · 이슈 번호를 누르면 폴더 경로 복사 (Win + R → Ctrl + V → Enter 로 열기) · 관리 > 이슈 폴더 (연결 상태 · 연결 시험 · 지금 맞추기 · 경로) · 시작할 때와 30분마다 자동으로 맞춤 · 파일 서버 연결이 끊기면 아무것도 만들지 않음",
   "업무관리 0.7.5": "시간 입력 표 날짜 머리글 · 하루 합계를 누르면 그날 한 일 팝업 (업무 · 이슈별 시간 + ✎ 내용, 안 적은 줄은 업무 제목 · ◀ ▶ · ← →) · [주간 한 일 보기] / [월간 한 일 보기] 팝업 (업무 · 이슈마다 합계 + 날짜별 시간 · 한 일, 전체 / 이슈 / 업무 거르기, 앞뒤 주 · 달) — 내 업무 · 사람별 · PL 일을 준 사람 화면 모두 · 시간을 넣고 칸을 나가면 바로 '한 일 한 줄' 입력 칸 (Enter 저장 · Esc 건너뛰기 · 내 정보에서 끄기) · 시간은 있는데 한 일이 없으면 ✎ 주황 · ✎ 창에 '팀장 · PL이 봅니다' 안내 · 공지 · 알림 팝업을 뺀 모든 창을 Esc 로 닫음 (쓴 내용이 있으면 '저장하지 않고 닫을까요?')",
@@ -160,6 +163,7 @@ const NOTICE: [string, string[]][] = [
   ["업무관리 0.7.5", ["시간 입력 표의 날짜(또는 하루 합계)를 누르면 그날 한 일이 팝업으로", "[주간 한 일 보기] — 이번 주 업무 · 이슈별 시간과 한 일을 한 창에 (월간 보기에서는 월간)", "시간을 넣으면 바로 '한 일 한 줄' 입력 칸 (Enter 저장 · Esc 건너뛰기, 내 정보에서 끄기)", "시간은 있는데 한 일을 안 적은 칸은 ✎가 주황", "모든 창을 Esc 로 닫기 (공지 · 알림 제외, 쓴 내용이 있으면 확인)"]],
   ["업무관리 0.7.6", ["이슈마다 파일 서버(이슈 자료 폴더)에 '모델 \\ 번호 이슈명' 폴더가 자동으로 생김 (새 이슈는 등록할 때)", "이슈 번호를 누르면 폴더 경로가 복사됨 → Win + R → Ctrl + V → Enter 로 폴더 열기"]],
   ["업무관리 0.7.7", ["파일 서버가 느릴 때 사이트가 잠시 멈추던 문제를 고쳤습니다"]],
+  ["업무관리 0.7.8", ["'연결이 비공개로 설정되어 있지 않습니다' 경고가 다시 뜨던 문제를 고쳤습니다 (인증서를 다시 설치할 필요 없음)"]],
 ];
 {
   const last = getSetting("last_version", "");
