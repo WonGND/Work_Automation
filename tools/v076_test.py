@@ -69,7 +69,10 @@ mdl = next(m for m in meta["models"] if m["part"] == pl_u["part"] and not m.get(
 st, r = pl.req("POST", "/api/issues", {"model_id": mdl["id"], "title": "C/G 시험: 폴더 이름?"})
 check("PL 이슈 등록", st == 200, r)
 want = f"{mdl['name']}/{r.get('no')} C_G 시험_ 폴더 이름_"
-check("등록하자마자 폴더", r.get("folder") == want and isdir(join(SHARE, want)), (r.get("folder"), want))
+for _ in range(30):   # 0.7.7: 등록은 폴더를 기다리지 않음 → 곧 생김
+    if isdir(join(SHARE, want)) and db.execute("SELECT folder FROM issues WHERE id=?", (r["id"],)).fetchone()[0] == want: break
+    time.sleep(0.2)
+check("등록하면 곧 폴더", isdir(join(SHARE, want)) and db.execute("SELECT folder FROM issues WHERE id=?", (r["id"],)).fetchone()[0] == want, want)
 check("이슈 목록에도 folder", any(i.get("folder") == want for i in pl.req("GET", "/api/issues?scope=part")[1]))
 # 이슈명을 바꿔도 폴더는 그대로
 pl.req("PUT", f"/api/issues/{r['id']}", {"title": "이름 바꿈"})

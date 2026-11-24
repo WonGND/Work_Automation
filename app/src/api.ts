@@ -733,14 +733,14 @@ export async function handle(req: Request, url: URL): Promise<Response> {
   // ── 0.7.6: 이슈 폴더 (관리) ──
   if (p.startsWith("/api/master/share")) {
     if (!isAdmin(me)) err(403, "팀장 · 마스터만");
-    if (p === "/api/master/share" && m === "GET") return json(shareView());
+    if (p === "/api/master/share" && m === "GET") return json(await shareView());
     if (p === "/api/master/share" && m === "PUT") {
       const u = str(body.unc, 300).replace(/\//g, "\\");
       if (u && !/^\\\\[^\\]+\\[^\\]+/.test(u)) err(400, "\\\\서버\\폴더 형태로 입력하세요");
-      setSetting("share_unc", u); audit(me.id, "이슈 폴더", "경로", { 경로: u }); return json(shareView());
+      setSetting("share_unc", u); audit(me.id, "이슈 폴더", "경로", { 경로: u }); return json(await shareView());
     }
-    if (p === "/api/master/share/test" && m === "POST") return json(testShare(me.id));
-    if (p === "/api/master/share/sync" && m === "POST") { const r = syncFolders(me.id); return json({ ...r, view: shareView() }); }
+    if (p === "/api/master/share/test" && m === "POST") return json(await testShare(me.id));
+    if (p === "/api/master/share/sync" && m === "POST") { const r = await syncFolders(me.id, undefined, true); return json({ ...r, view: await shareView() }); }
     err(404, "없는 주소");
   }
 
@@ -778,7 +778,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       setMembers(id, body.members || [], !!body.confirm_pl, me);
     })();
     audit(me.id, "이슈 등록", no, body);
-    try { syncFolders(me.id, [id]); } catch (e) { console.error("이슈 폴더 만들기 실패", no, e); }   // 0.7.6: 연결 안 돼 있으면 아무것도 안 함
+    syncFolders(me.id, [id]).catch(e => console.error("이슈 폴더 만들기 실패", no, e));   // 0.7.6: 연결 안 돼 있으면 아무것도 안 함 · 0.7.7: 기다리지 않음 (파일 서버가 느려도 등록은 바로 끝남)
     return json(issueRow(q1("SELECT * FROM issues WHERE id=?", id)));
   }
   mt = p.match(/^\/api\/issues\/(\d+)(\/me|\/hide|\/image|\/pptx)?$/);
