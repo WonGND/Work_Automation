@@ -1670,7 +1670,7 @@ async function pageAdmin() {
   }
   if (tab === "fold") {   // 0.7.6: 이슈 폴더 (파일 서버)
     let v = await api("GET", "/api/master/share");
-    const unc = h("input", { class: "inp", value: v.unc, placeholder: "예: \\\\서버\\공유폴더\\이슈업무원본자료", style: "max-width:560px" });
+    const unc = h("input", { class: "inp", value: v.unc, placeholder: "예: \\\\서버\\공유폴더\\이슈자료", style: "max-width:560px" });
     const out = h("div");
     const draw = (res) => {
       out.replaceChildren(
