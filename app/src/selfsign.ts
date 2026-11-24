@@ -30,7 +30,7 @@ function tlvAt(b: Buffer, off: number) {
   return { tag: b[off], start: off, body: off + h, end: off + h + l };
 }
 // 0.7.8: CA 인증서의 '주체(subject)' 원본 바이트 — 서버 인증서의 '발급자'는 이것과 바이트까지 같아야 PC가 둘을 잇는다
-//   (예전 CA는 조직 이름이 'NEOVUE 회로팀 …'이라 이름을 다시 만들면 달라짐)
+//   (예전 CA는 조직 이름이 지금 코드와 달라 이름을 다시 만들면 어긋남)
 export function caSubject(caCertPem: string): Buffer {
   const d = der(caCertPem.split("-----END CERTIFICATE-----")[0] + "-----END CERTIFICATE-----");
   const tbs = tlvAt(d, tlvAt(d, 0).body);
