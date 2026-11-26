@@ -101,20 +101,53 @@ function modal(title, body, buttons, opts = {}) {
   const hd = h("div", { class: "hd", title: "제목 줄을 끌어서 창을 옮길 수 있습니다" }, title);
   const box = h("div", { class: "modal" + (opts.cls ? " " + opts.cls : "") }, hd, h("div", { class: "bd" }, body), ft);
   bg.append(box); dragByHeader(box, hd);
-  // 0.8.0: 오른쪽 아래 모서리로 크기 조절 · 창 종류마다 마지막 크기 기억 (이 PC) · 제목 줄 더블클릭 = 원래 크기 · 공지 · 알림 팝업은 고정
+  // 0.8.0: 크기 조절 · 창 종류마다 마지막 크기 기억 (이 PC) · 제목 줄 더블클릭 = 원래 크기 · 공지 · 알림 팝업은 고정
+  // 0.8.2: 네 변 · 네 모서리 어디든 잡고 늘림 (예전엔 오른쪽 아래 작은 모서리만). opts.grow = 창 높이를 따라 늘어날 칸 (한 일 칸)
   if (!opts.noClose && !/\bboard\b/.test(opts.cls || "")) {
     box.classList.add("rsz");
     const key = "wm_sz:" + (opts.key || `${opts.cls || ""}:${typeof title === "string" ? title.replace(/[0-9]+/g, "#").slice(0, 30) : "-"}`);
-    try { const s = JSON.parse(localStorage.getItem(key) || "null"); if (s?.w && s?.h) { box.style.width = Math.min(s.w, innerWidth - 16) + "px"; box.style.height = Math.min(s.h, innerHeight - 16) + "px"; } } catch {}
-    let start = "";
-    box.addEventListener("pointerdown", () => (start = box.style.width + "x" + box.style.height));
-    document.addEventListener("pointerup", function up() {
-      if (!box.isConnected) return document.removeEventListener("pointerup", up);
-      const now = box.style.width + "x" + box.style.height;
-      if (start && now !== start && box.style.width) { try { localStorage.setItem(key, JSON.stringify({ w: box.offsetWidth, h: box.offsetHeight })); } catch {} }
-      start = "";
+    const bd = box.querySelector(":scope > .bd"), grow = opts.grow || null;
+    const fit = () => {   // 창 높이가 정해져 있으면 grow 칸이 남는 높이를 채움
+      if (!grow || !box.style.height) return;
+      grow.style.height = "";
+      const cs = getComputedStyle(bd), used = [...bd.children].reduce((a, c) => a + c.offsetHeight, 0) + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      const extra = bd.clientHeight - used;
+      if (extra > 0) grow.style.height = (grow.offsetHeight + extra) + "px";
+    };
+    try { const s = JSON.parse(localStorage.getItem(key) || "null"); if (s?.w && s?.h) { box.style.width = Math.min(s.w, innerWidth - 16) + "px"; box.style.height = Math.min(s.h, innerHeight - 16) + "px"; requestAnimationFrame(fit); } } catch {}
+    for (const d of ["n", "s", "e", "w", "ne", "nw", "se", "sw"]) {
+      const g = h("div", { class: "rsz-g rsz-" + d });
+      g.addEventListener("pointerdown", e => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation(); g.setPointerCapture(e.pointerId);
+        const r = box.getBoundingClientRect();
+        box.classList.add("moved"); box.style.left = r.left + "px"; box.style.top = r.top + "px"; box.style.width = r.width + "px"; box.style.height = r.height + "px";
+        const x0 = e.clientX, y0 = e.clientY, MW = 360, MH = 200;
+        document.body.classList.add("mresizing");
+        const mv = ev => {
+          const dx = ev.clientX - x0, dy = ev.clientY - y0;
+          let L = r.left, T = r.top, W = r.width, H = r.height;
+          if (d.includes("e")) W = Math.min(innerWidth - L - 4, Math.max(MW, r.width + dx));
+          if (d.includes("s")) H = Math.min(innerHeight - T - 4, Math.max(MH, r.height + dy));
+          if (d.includes("w")) { W = Math.max(MW, Math.min(r.right - 4, r.width - dx)); L = r.right - W; }
+          if (d.includes("n")) { H = Math.max(MH, Math.min(r.bottom - 4, r.height - dy)); T = r.bottom - H; }
+          box.style.left = L + "px"; box.style.top = T + "px"; box.style.width = W + "px"; box.style.height = H + "px"; fit();
+        };
+        const up = () => {
+          g.removeEventListener("pointermove", mv); g.removeEventListener("pointerup", up); g.removeEventListener("pointercancel", up);
+          document.body.classList.remove("mresizing");
+          try { localStorage.setItem(key, JSON.stringify({ w: box.offsetWidth, h: box.offsetHeight })); } catch {}
+        };
+        g.addEventListener("pointermove", mv); g.addEventListener("pointerup", up); g.addEventListener("pointercancel", up);
+      });
+      box.append(g);
+    }
+    hd.addEventListener("dblclick", e => {
+      if (e.target.closest("input,button,select")) return;
+      box.classList.remove("moved"); for (const k of ["width", "height", "left", "top"]) box.style[k] = "";
+      if (grow) grow.style.height = "";
+      try { localStorage.removeItem(key); } catch {}
     });
-    hd.addEventListener("dblclick", e => { if (e.target.closest("input,button,select")) return; box.style.width = ""; box.style.height = ""; try { localStorage.removeItem(key); } catch {} });
   }
   bg.addEventListener("mousedown", e => { if (e.target === bg && !opts.noBgClose) (opts.bgEsc && bg._esc ? bg._esc() : close()); });   // 0.8.1: bgEsc = 바깥을 눌러도 쓴 게 있으면 물어봄
   document.body.append(bg);
@@ -872,7 +905,7 @@ function splitModal(r, date, hours, unit, o = {}) {
     finally { busy = false; }
   };
   const close = modal(`${r.title} · ${dd(date)}`, body, [{ text: "저장", cls: "pri", fn: save }],
-    { key: "split", cls: "split-pop", bgEsc: true, onClose: () => { if (SPLIT_CLOSE === close) SPLIT_CLOSE = null; setTimeout(() => (next || o.back)?.focus?.(), 0); } });
+    { key: "split", cls: "split-pop", bgEsc: true, grow: list, onClose: () => { if (SPLIT_CLOSE === close) SPLIT_CLOSE = null; setTimeout(() => (next || o.back)?.focus?.(), 0); } });
   SPLIT_CLOSE = close;
   body.addEventListener("keydown", async e => {
     if (e.key !== "Enter" || e.isComposing || e.target.closest?.(".ssel-list")) return;
@@ -910,6 +943,10 @@ const rowLabel = r => r.type === "issue" ? [h("b", {}, r.no + " "), r.title] : r
 const kindLabel = r => r.type === "issue" ? "이슈" : r.fixed ? "기본" : "업무";
 const noteCell = (r, d) => r.texts?.[d] ? h("div", { class: "pre" }, r.texts[d]) : h("div", { class: "none", title: "한 일을 적지 않아 업무 제목을 보여 줍니다" }, r.title);
 const whoName = uid => (M.users.find(u => u.id === uid)?.name || "").trim();
+// 0.8.2: 그날 한 일 표 (그날 한 일 · 주간 · 월간 한 일 보기가 같은 양식)
+const dayTable = (rows, d) => h("div", { class: "lg lg4" }, ["구분", "업무 · 이슈", "시간", "한 일"].map(x => h("div", { class: "lh" }, x)),
+  rows.flatMap(r => [h("div", { class: "lk" }, kindLabel(r)), h("div", {}, rowLabel(r)), h("div", { class: "n" }, r.hours[d] ? fmtH(r.hours[d]) + "h" : "-"), noteCell(r, d)]));
+const dayTot = (rows, d) => rows.reduce((a, r) => a + (r.kind === "휴가" || r.kind === "조퇴" ? 0 : (r.hours[d] || 0)), 0);
 function dayLog(w, date, uid) {
   const days = w.days.map(d => d.date); let k = days.indexOf(date);
   const body = h("div", { class: "log-pop" });
@@ -921,8 +958,7 @@ function dayLog(w, date, uid) {
     setTitle(`${whoName(uid)} · ${dd(d)} 한 일 · 합계 ${fmtH(tot)}h`);
     body.replaceChildren(
       h("div", { class: "muted small", style: "margin-bottom:8px" }, "시간 입력 표에서 ✎로 적은 내용을 그대로 보여 줍니다. 안 적은 줄은 업무 제목을 흐리게 보여 줍니다."),
-      rows.length ? h("div", { class: "lg lg4" }, ["구분", "업무 · 이슈", "시간", "한 일"].map(x => h("div", { class: "lh" }, x)),
-        rows.flatMap(r => [h("div", { class: "lk" }, kindLabel(r)), h("div", {}, rowLabel(r)), h("div", { class: "n" }, r.hours[d] ? fmtH(r.hours[d]) + "h" : "-"), noteCell(r, d)]))
+      rows.length ? dayTable(rows, d)
         : h("div", { class: "muted", style: "padding:14px 4px" }, "이날 넣은 시간이 없습니다."));
     prev.disabled = k <= 0; next.disabled = k >= days.length - 1;
     prev.textContent = k > 0 ? `◀ ${dd(days[k - 1])}` : "◀"; next.textContent = k < days.length - 1 ? `${dd(days[k + 1])} ▶` : "▶";
@@ -949,26 +985,12 @@ async function periodLog(uid, from, mon) {
     const work = logRows(w).filter(r => r.kind !== "휴가" && r.kind !== "조퇴");
     const tot = work.reduce((a, r) => a + ds.reduce((b, d) => b + (r.hours[d] || 0), 0), 0);
     ttl.textContent = `${whoName(uid)} · ${mon ? `${w.from.slice(0, 4)}년 ${Number(w.from.slice(5, 7))}월` : `${dd(w.from)} ~ ${dd(w.to)}`} 한 일 · 합계 ${fmtH(tot)}h`;
-    // 0.8.0: 안 1 — 요약 줄 · 이슈 / 업무 / 기본 구역 · 시간 많은 순 · 비중 막대 · 날짜별 한 일
-    const sumOf = r => ds.reduce((b, d) => b + (r.hours[d] || 0), 0);
-    const secs = [["issue", "이슈", rows.filter(r => r.type === "issue")], ["task", "업무", rows.filter(r => r.type === "task" && !r.fixed)], ["base", "기본 행", rows.filter(r => r.type === "task" && r.fixed)]]
-      .map(([k, t, l]) => [k, t, l.sort((a, b) => sumOf(b) - sumOf(a))]).filter(x => x[2].length);
-    const secTot = l => l.filter(r => r.kind !== "휴가" && r.kind !== "조퇴").reduce((a, r) => a + sumOf(r), 0);
-    const iss = rows.filter(r => r.type === "issue"), tks = rows.filter(r => r.type === "task" && !r.fixed);
-    const item = (r, sec) => {
-      const s = sumOf(r), pct = tot > 0 && r.kind !== "휴가" && r.kind !== "조퇴" ? Math.min(100, s / tot * 100) : 0;
-      const ms = r.type === "task" ? (r.models?.length > 1 ? r.models : r.model ? [r.model] : []) : (r.model ? [r.model] : []);
-      return h("div", { class: "wl-it" },
-        h("div", { class: "wl-hd" }, h("span", { class: "wl-tg " + sec }, sec === "issue" ? "이슈" : sec === "task" ? "업무" : "기본"), h("span", { class: "wl-tt" }, rowLabel(r)),
-          ...ms.map(m => h("span", { class: "wl-m" }, m)), h("span", { class: "spacer" }),
-          pct ? h("span", { class: "wl-bar", title: `이 기간의 ${Math.round(pct)}%` }, h("i", { style: `width:${pct}%` })) : "", h("b", { class: "wl-h" }, fmtH(s) + "h")),
-        ...ds.filter(d => r.hours[d] || r.texts?.[d]).map(d => h("div", { class: "wl-ln" }, h("span", { class: "d" }, dd(d)), h("b", {}, r.hours[d] ? fmtH(r.hours[d]) + "h" : "-"),
-          r.texts?.[d] ? h("span", { class: "pre" }, r.texts[d]) : h("span", { class: "none" }, "-"))));
-    };
-    body.replaceChildren(rows.length ? h("div", {},
-      flt === "all" ? h("div", { class: "wl-sum" }, h("div", {}, h("span", {}, "합계"), h("b", {}, fmtH(tot) + "h")),
-        h("div", {}, h("span", {}, "이슈"), h("b", {}, `${iss.length}건 · ${fmtH(secTot(iss))}h`)), h("div", {}, h("span", {}, "업무"), h("b", {}, `${tks.length}건 · ${fmtH(secTot(tks))}h`))) : "",
-      ...secs.map(([k, t, l]) => h("div", { class: "wl-sec" }, h("div", { class: "wl-st" }, h("b", {}, t), h("span", { class: "muted small" }, `${l.length}건 · ${fmtH(secTot(l))}h`)), ...l.map(r => item(r, k)))))
+    // 0.8.2: 그날 한 일(날짜를 누르면 뜨는 창)과 같은 양식 — 날짜마다 '구분 · 업무 · 이슈 · 시간 · 한 일' 표를 차례로
+    const daysWith = ds.filter(d => rows.some(r => r.hours[d] || r.texts?.[d]));
+    body.replaceChildren(daysWith.length ? h("div", {},
+      h("div", { class: "muted small", style: "margin-bottom:8px" }, "시간 입력 표에서 ✎로 적은 내용을 그대로 보여 줍니다. 안 적은 줄은 업무 제목을 흐리게 보여 줍니다."),
+      ...daysWith.map(d => { const rs = rows.filter(r => r.hours[d] || r.texts?.[d]); return h("div", { class: "pl-day" },
+        h("div", { class: "pl-dh" }, h("b", {}, dd(d)), h("span", { class: "muted small" }, `합계 ${fmtH(dayTot(rs, d))}h`)), dayTable(rs, d)); }))
       : h("div", { class: "muted", style: "padding:14px 4px" }, `이 ${mon ? "달" : "주"}에 넣은 시간이 없습니다.`));
   };
   const key = e => { if (e.target.closest?.("input,textarea")) return; if (e.key === "ArrowLeft") shift(-1); else if (e.key === "ArrowRight") shift(1); };
@@ -981,10 +1003,11 @@ async function periodLog(uid, from, mon) {
 function logModal(r, date, readonly, after) {
   const hrs = h("input", { class: "inp", inputmode: "decimal", value: r.hours[date] ? String(r.hours[date]) : "", disabled: readonly, style: "width:100px" });
   const isIssue = r.type === "issue";
-  const txt = h("textarea", { class: "inp", rows: 5, disabled: readonly, placeholder: isIssue ? "이 이슈에서 오늘 한 일 (예: 불량품 3EA 재현 시험, 원인 후보 2건 확인)" : "이 업무에서 그날 한 일 (예: 전원부 회로도 1차 검토, 부품 2종 변경 검토)" }, r.texts?.[date] || "");
+  const txt = h("textarea", { class: "inp", rows: 12, disabled: readonly, placeholder: isIssue ? "이 이슈에서 오늘 한 일 (예: 불량품 3EA 재현 시험, 원인 후보 2건 확인)" : "이 업무에서 그날 한 일 (예: 전원부 회로도 1차 검토, 부품 2종 변경 검토)" }, r.texts?.[date] || "");
   modal(`${isIssue ? r.no + " " : ""}${r.title} · ${dd(date)}`, h("div", { class: "form" }, r.duty ? field("할 일 (PL 지정)", h("div", { class: "pre small" }, r.duty)) : "", ...field("투입 시간(h)", hrs), ...field("한 일", txt, false),
       readonly ? "" : h("div", { class: "full muted small" }, "적은 내용은 팀장 · PL이 사람별 화면에서 봅니다 (안 적으면 업무 제목만 보입니다)")),
-    readonly ? [] : [{ text: "저장", cls: "pri", fn: async () => { await api("PUT", "/api/hours", { type: isIssue ? "issue" : "task", id: r.id, date, hours: hrs.value.trim() === "" ? 0 : Number(hrs.value), text: txt.value }); toast("저장했습니다"); await after(); } }]);
+    readonly ? [] : [{ text: "저장", cls: "pri", fn: async () => { await api("PUT", "/api/hours", { type: isIssue ? "issue" : "task", id: r.id, date, hours: hrs.value.trim() === "" ? 0 : Number(hrs.value), text: txt.value }); toast("저장했습니다"); await after(); } }],
+    { cls: "hourlog", key: "hourlog", grow: txt });   // 0.8.2: 업무 시간 입력 창 — 크게 · 화면 가운데 · 창을 늘리면 한 일 칸도 같이
   setTimeout(() => txt.focus(), 50);
 }
 
