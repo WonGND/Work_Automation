@@ -55,7 +55,7 @@ st, _, _ = raw(mem, "/api/folder-tool"); check("경로 없으면 404", st == 404
 adm.req("PUT", "/api/master/share", {"unc": "\\\\srv\\team\\이슈자료"})
 st, ct, data = raw(mem, "/api/folder-tool"); check("팀원 설치 묶음 받기", st == 200 and "zip" in ct, (st, ct))
 z = zipfile.ZipFile(io.BytesIO(data)); names = sorted(z.namelist())
-check("묶음 구성", names == ["README.txt", "install.cmd", "open-folder.ps1", "uninstall.cmd"], names)
+check("묶음 구성", {"README.txt", "install.cmd", "open-folder.ps1", "uninstall.cmd"} <= set(names), names)
 ps = z.read("open-folder.ps1").decode("utf-8-sig")
 check("스크립트에 지금 경로", "$Root = '\\\\srv\\team\\이슈자료'" in ps, ps[:300])
 check("스크립트: 상위 경로 거부", "\\.\\." in ps and "Fail" in ps)

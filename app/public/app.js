@@ -35,6 +35,22 @@ const addDays = (s, n) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d
 const monday = s => { const d = new Date(s + "T00:00:00Z"); const w = (d.getUTCDay() + 6) % 7; return addDays(s, -w); };
 const userName = id => M.users.find(u => u.id === id)?.name || "";
 const modelName = id => M.models.find(m => m.id === id)?.name || "";
+// 0.8.0: 모델 여러 개 고르기 (칩 + 검색 상자) · 비우면 공통 · .value = [모델 id …]
+function modelMulti(list, ids, { disabled } = {}) {
+  let cur = ids.filter(Boolean);
+  const box = h("div", { class: "mm" });
+  const label = m => `${m.name} (${m.part} · ${m.phase || "-"})`;
+  const draw = () => {
+    const pick = searchSel([["", cur.length ? "+ 모델 추가" : "공통 (모델 없음) · 고르면 추가"], ...list.filter(m => !cur.includes(m.id)).map(m => [m.id, label(m)])], "", { disabled });
+    pick.addEventListener("change", e => { if (e.target !== pick) return; if (pick.value && !cur.includes(Number(pick.value))) { cur.push(Number(pick.value)); draw(); } });   // 안쪽 입력 칸의 change 는 무시
+    box.replaceChildren(
+      ...cur.map(id => h("span", { class: "mm-chip" }, modelName(id) || "?", disabled ? "" : h("button", { type: "button", title: "빼기", onclick: () => { cur = cur.filter(x => x !== id); draw(); } }, "✕"))),
+      disabled ? (cur.length ? "" : h("span", { class: "muted" }, "공통")) : pick,
+      cur.length > 1 ? h("div", { class: "muted small", style: "flex-basis:100%" }, "모델 여러 개: 시간을 넣으면 모델별로 시간 · 한 일을 나눕니다 (기본: 똑같이)") : "");
+  };
+  draw(); Object.defineProperty(box, "value", { get: () => [...cur] }); return box;
+}
+const taskModelIds = t => { try { const a = JSON.parse(t.models || "[]"); if (Array.isArray(a) && a.length > 1) return a.map(Number); } catch {} return t.model_id ? [t.model_id] : []; };
 const badge = (cls, txt) => (txt ? h("span", { class: "badge " + (cls || "") }, txt) : "");
 const roleKo = { member: "팀원", pl: "PL", lead: "팀장", master: "마스터" };
 function sel(options, value, attrs = {}) {
@@ -85,6 +101,21 @@ function modal(title, body, buttons, opts = {}) {
   const hd = h("div", { class: "hd", title: "제목 줄을 끌어서 창을 옮길 수 있습니다" }, title);
   const box = h("div", { class: "modal" + (opts.cls ? " " + opts.cls : "") }, hd, h("div", { class: "bd" }, body), ft);
   bg.append(box); dragByHeader(box, hd);
+  // 0.8.0: 오른쪽 아래 모서리로 크기 조절 · 창 종류마다 마지막 크기 기억 (이 PC) · 제목 줄 더블클릭 = 원래 크기 · 공지 · 알림 팝업은 고정
+  if (!opts.noClose && !/\bboard\b/.test(opts.cls || "")) {
+    box.classList.add("rsz");
+    const key = "wm_sz:" + (opts.key || `${opts.cls || ""}:${typeof title === "string" ? title.replace(/[0-9]+/g, "#").slice(0, 30) : "-"}`);
+    try { const s = JSON.parse(localStorage.getItem(key) || "null"); if (s?.w && s?.h) { box.style.width = Math.min(s.w, innerWidth - 16) + "px"; box.style.height = Math.min(s.h, innerHeight - 16) + "px"; } } catch {}
+    let start = "";
+    box.addEventListener("pointerdown", () => (start = box.style.width + "x" + box.style.height));
+    document.addEventListener("pointerup", function up() {
+      if (!box.isConnected) return document.removeEventListener("pointerup", up);
+      const now = box.style.width + "x" + box.style.height;
+      if (start && now !== start && box.style.width) { try { localStorage.setItem(key, JSON.stringify({ w: box.offsetWidth, h: box.offsetHeight })); } catch {} }
+      start = "";
+    });
+    hd.addEventListener("dblclick", e => { if (e.target.closest("input,button,select")) return; box.style.width = ""; box.style.height = ""; try { localStorage.removeItem(key); } catch {} });
+  }
   bg.addEventListener("mousedown", e => { if (e.target === bg && !opts.noBgClose) close(); });
   document.body.append(bg);
   return close;
@@ -125,6 +156,7 @@ function searchSel(options, value, attrs = {}) {
   const pick = o => { if (!o) return; const ch = o.v !== cur; cur = o.v; close(); if (ch) wrap.dispatchEvent(new Event("change", { bubbles: true })); };
   inp.addEventListener("focus", open);
   inp.addEventListener("mousedown", () => { if (list.hidden && document.activeElement === inp) open(); });
+  inp.addEventListener("mouseup", e => { if (inp.value === label(cur)) { e.preventDefault(); setTimeout(() => inp.select(), 0); } });   // 0.8.0: 이미 커서가 있어도 누르면 전체 선택 → 바로 검색어 입력
   inp.addEventListener("input", () => { list.hidden = false; draw(inp.value); });
   inp.addEventListener("blur", close);
   inp.addEventListener("keydown", e => {
@@ -442,6 +474,7 @@ function showPops(list) {
       h("div", { class: "pop-hd" }, h("span", { class: "pop-ic" }, ic), h("b", {}, what), d.by ? h("span", { class: "pop-by" }, `${d.by}`) : "", h("div", { class: "spacer" }), h("span", { class: "muted small" }, n.created.slice(5, 16).replace("-", "/"))),
       d["제목"] ? h("div", { class: "pop-ttl" }, d["제목"]) : h("div", { class: "pop-txt" }, n.text),
       d["본문"] ? h("div", { class: "pop-body pre" }, d["본문"]) : "",
+      n.kind === "요청" && (d["내용"] || d["답변"]) ? h("div", { style: "display:flex;justify-content:flex-end;margin-top:4px" }, copyBtn(d["내용"] || d["답변"], "📋 내용 복사")) : "",
       rows.length ? h("div", { class: "pop-kv" }, rows.map(([k, v]) => [h("span", {}, k), h("div", { class: "pre" }, String(v))])) : "",
       n.link ? h("div", { class: "pop-go" }, h("button", { class: "link2", onclick: async () => { await ack(); close(); if (location.hash === n.link) route(); else location.hash = n.link; } }, { "#/me": "내 업무로 가기 →", "#/myissues": "내 이슈로 가기 →", "#/requests": "요청으로 가기 →", "#/notices": "공지로 가기 →" }[n.link] || "바로 가기 →")) : "");
   };
@@ -676,7 +709,13 @@ async function renderWeek(box, uid, readonly, refreshAll) {
         inp.classList.remove("saved"); void inp.offsetWidth; inp.classList.add("saved"); recalc(); rowTot(); box.dispatchEvent(new Event("hours-saved"));
         markNote();
         // 0.7.5: 시간을 넣고 칸을 나가면 바로 "한 일 한 줄" (이미 적었거나 0이면 안 띄움 · 내 정보에서 끌 수 있음)
-        if (n && nb && !r.texts?.[d.date] && getPref("noteInline", true)) noteInline(inp, r, d.date, n, txt => { (r.texts = r.texts || {})[d.date] = txt; markNote(); });
+        if (r.split) {   // 0.8.0: 다중 모델 · 외근 — 모델별 시간 · 한 일 나누기 (외근은 늘 · 다중 모델은 '한 일 한 줄' 설정을 따름)
+          const old = r.splits?.[d.date];
+          if (old && old.reduce((a, x) => a + x.hours, 0) !== n) { delete r.splits[d.date]; }
+          if (n && (r.fixedKey === "5" || getPref("noteInline", true))) splitInline(inp, r, d.date, n, w.unit, markNote);
+          else if (!n && r.splits) delete r.splits[d.date];
+        }
+        else if (n && nb && !r.texts?.[d.date] && getPref("noteInline", true)) noteInline(inp, r, d.date, n, txt => { (r.texts = r.texts || {})[d.date] = txt; markNote(); });
       } catch (e) { toast(e.message, true); inp.value = last; }
     });
     let rowTot = () => {};
@@ -686,7 +725,7 @@ async function renderWeek(box, uid, readonly, refreshAll) {
     const markNote = () => { if (!nb) return; const has = !!r.texts?.[d.date]; nb.classList.toggle("has", has); nb.classList.toggle("miss", !has && !!r.hours[d.date]); nb.title = has ? r.texts[d.date] : r.hours[d.date] ? "한 일을 아직 안 적었습니다 · 눌러서 쓰기" : "그날 한 일 쓰기"; nb.disabled = dis && !has; };
     if (r.type === "issue" || (r.kind !== "휴가" && r.kind !== "조퇴")) {
       nb = h("button", { class: "note-btn", tabindex: -1 }, "✎");
-      nb.addEventListener("click", () => logModal(r, d.date, readonly || dis, again));
+      nb.addEventListener("click", () => (r.split && !(readonly || dis) && r.hours[d.date]) ? splitInline(inp, r, d.date, r.hours[d.date], w.unit, markNote) : logModal(r, d.date, readonly || dis, again));
       wrap.append(nb); markNote();
     }
     return { td: h("td", { class: "c " + (d.workday ? "" : "we ") + (d.today ? "today" : "") }, wrap), setTot: f => (rowTot = f) };
@@ -703,7 +742,7 @@ async function renderWeek(box, uid, readonly, refreshAll) {
     const name = h("td", { class: "name" },
       drag && !readonly ? dragHandle() : "",
       h("span", { class: "t lnk", role: "button", title: (r.duty ? `할 일 (PL): ${r.duty}\n` : "") + "눌러서 내용 보기", onclick: open }, dotEl, r.type === "issue" ? [h("b", {}, r.no + " "), r.title] : r.title),
-      h("span", { class: "m" }, r.type === "issue" ? [badge(r.released ? "warn" : r.plManage ? "pl" : "role", r.role), " ", r.model || "공통"] : [r.kind, r.model ? " · " + r.model : r.fixed ? " · 기본 행" : " · 공통"],
+      h("span", { class: "m" }, r.type === "issue" ? [badge(r.released ? "warn" : r.plManage ? "pl" : "role", r.role), " ", r.model || "공통"] : [r.kind, r.models?.length > 1 ? h("span", { title: r.models.join(" · ") }, ` · ${r.models[0]} 외 ${r.models.length - 1}`) : r.model ? " · " + r.model : r.fixed ? (r.fixedKey === "5" ? " · 기본 행 · 모델별 나누기" : " · 기본 행") : " · 공통"],
         r.assigned ? [" ", badge("pl", "PL 지정")] : "", r.hidden ? [" ", badge("warn", "삭제됨")] : "", r.done ? [" ", badge("done", "완료")] : ""));
     target.append(h("tr", { "data-id": r.id }, name, tds, tot));
   };
@@ -735,6 +774,76 @@ async function renderWeek(box, uid, readonly, refreshAll) {
 }
 
 // 0.7.5: 시간 칸 아래 "한 일 한 줄" — Enter 저장 · Esc 건너뛰기 (둘 다 원래 가려던 칸으로) · 칸 밖을 누르면 적은 것이 있을 때만 저장
+// 0.8.0: 모델별 나누기 칸 — 다중 모델 업무는 그 업무의 모델들, 외근은 모델을 골라 추가. 합계 = 칸 시간이어야 저장
+//   Enter = 저장 · Esc = 건너뛰기 (다중 모델은 똑같이 나눔, 외근은 공통)
+function evenSplit(total, n, unit) {
+  const k = Math.round(total / unit), base = Math.floor(k / n), rest = k - base * n;
+  return Array.from({ length: n }, (_, i) => (base + (i < rest ? 1 : 0)) * unit);
+}
+function splitInline(inp, r, date, hours, unit, after) {
+  document.querySelectorAll(".note-inl").forEach(e => e.remove());
+  const next = document.activeElement !== inp && document.activeElement?.matches?.(".week input.h") ? document.activeElement : null;
+  const out = r.fixedKey === "5";
+  const opts = [["0", "공통 (모델 없음)"], ...modelsFor("").map(m => [m.id, `${m.name} (${m.part})`])];
+  const old = r.splits?.[date];
+  let seed = old?.length ? old.map(x => ({ m: x.model_id, h: x.hours, t: x.text }))
+    : out ? [{ m: 0, h: hours, t: "" }] : r.modelIds.map(m => ({ m, h: 0, t: "" }));
+  if (!old?.length || seed.reduce((a, x) => a + x.h, 0) !== hours) evenSplit(hours, seed.length, unit).forEach((v, i) => (seed[i].h = v));
+  const list = h("div", { class: "spl-rows" });
+  const sumEl = h("span", {});
+  const rows = [];
+  const upd = () => { const s = rows.reduce((a, x) => a + (Number(x.hh.value) || 0), 0); sumEl.textContent = `합계 ${fmtH(s)}h / 칸 ${fmtH(hours)}h`; sumEl.className = Math.abs(s - hours) < 1e-9 ? "ok" : "bad"; return s; };
+  const addRow = (x, focus) => {
+    const mEl = out ? searchSel(opts, String(x.m ?? 0)) : h("span", { class: "spl-m" }, modelName(x.m) || "?");
+    const hh = h("input", { class: "inp spl-h", inputmode: "decimal", value: x.h ? String(x.h) : "" });
+    const tt = h("input", { class: "inp spl-t", maxlength: 500, value: x.t || "", placeholder: "한 일 (선택)" });
+    const o = { mEl, hh, tt, m: x.m };
+    const del = out && rows.length ? h("button", { type: "button", class: "btn sm", title: "이 줄 지우기", onclick: () => { rows.splice(rows.indexOf(o), 1); row.remove(); upd(); } }, "✕") : h("span");
+    const row = h("div", { class: "spl-row" }, mEl, hh, tt, del);
+    hh.addEventListener("input", upd);
+    rows.push(o); list.append(row); upd();
+    if (focus) (out ? mEl.querySelector("input") : hh)?.focus();
+  };
+  seed.forEach(x => addRow(x));
+  const addBtn = out ? h("button", { type: "button", class: "link2", onclick: () => { const s = upd(); addRow({ m: 0, h: Math.max(0, hours - s), t: "" }, true); } }, "+ 모델 추가") : "";
+  const box = h("div", { class: "note-inl spl-inl" },
+    h("div", { class: "spl-hd" }, h("b", {}, `${r.title} · ${dd(date)} · ${fmtH(hours)}h`), h("span", { class: "muted small" }, out ? "모델을 고르고 모델별 시간 · 한 일" : "모델별 시간 · 한 일 (기본: 똑같이 나눔)")),
+    h("div", { class: "spl-row spl-lh" }, h("span", {}, "모델"), h("span", {}, "시간"), h("span", {}, "한 일"), h("span")), list,
+    h("div", { class: "spl-ft" }, addBtn, sumEl, h("span", { class: "muted small" }, "Enter = 저장 · Esc = 건너뛰기")));
+  const rc = inp.getBoundingClientRect();
+  box.style.left = Math.max(8, Math.min(innerWidth - 560, rc.left + scrollX - 40)) + "px"; box.style.top = (rc.bottom + scrollY + 4) + "px";
+  document.body.append(box);
+  let fin = false;
+  const end = async save => {
+    if (fin) return;
+    if (save) {
+      const sp = rows.map(o => ({ model_id: out ? Number(o.mEl.value) || 0 : o.m, hours: Number(o.hh.value) || 0, text: o.tt.value.trim() })).filter(x => x.hours > 0);
+      const s = sp.reduce((a, x) => a + x.hours, 0);
+      if (Math.abs(s - hours) > 1e-9) { toast(`모델별 시간 합계(${fmtH(s)}h)를 칸 시간(${fmtH(hours)}h)과 맞춰 주세요`, true); return; }
+      if (new Set(sp.map(x => x.model_id)).size !== sp.length) { toast("같은 모델이 두 줄 있습니다", true); return; }
+      fin = true;
+      try {
+        await api("PUT", "/api/hours", { type: "task", id: r.id, date, hours, splits: sp });
+        (r.splits ||= {})[date] = sp.map(x => ({ ...x, model: x.model_id ? modelName(x.model_id) : "공통" }));
+        const txt = sp.filter(x => x.text).map(x => `[${x.model_id ? modelName(x.model_id) : "공통"} ${fmtH(x.hours)}h] ${x.text}`).join(" / ");
+        r.texts ||= {}; if (txt) r.texts[date] = txt; else delete r.texts[date];
+        toast("모델별로 나눠 저장했습니다");
+      } catch (e) { toast(e.message, true); fin = false; return; }
+    } else fin = true;
+    box.remove(); after?.(); (next || inp).focus();
+  };
+  box.addEventListener("keydown", e => {
+    if (e.isComposing || e.target.closest?.(".ssel-list")) return;
+    if (e.key === "Enter" && !e.target.matches?.(".ssel-in")) { e.preventDefault(); end(true); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(false); }
+  });
+  // 칸 밖을 누르면: 고친 게 있으면 저장 시도(합계가 안 맞으면 남김), 없으면 닫기
+  const snap = () => rows.map(o => `${out ? o.mEl.value : o.m}:${o.hh.value}:${o.tt.value}`).join("|");
+  const first = snap();
+  const outside = e => { if (fin) return document.removeEventListener("mousedown", outside, true); if (box.contains(e.target) || e.target.closest?.(".ssel-list")) return; end(snap() !== first); };
+  setTimeout(() => document.addEventListener("mousedown", outside, true), 0);
+  setTimeout(() => (rows[0]?.[out ? "mEl" : "hh"]?.querySelector?.("input") || rows[0]?.hh)?.focus(), 30);
+}
 function noteInline(inp, r, date, hours, done) {
   document.querySelectorAll(".note-inl").forEach(e => e.remove());
   const next = document.activeElement !== inp && document.activeElement?.matches?.(".week input.h") ? document.activeElement : null;
@@ -782,7 +891,7 @@ function dayLog(w, date, uid) {
   const ttl = h("span", {});
   setTitle = t => (ttl.textContent = t);
   body.append();
-  const close = modal(ttl, h("div", {}, body, h("div", { class: "row", style: "margin-top:10px;gap:6px" }, prev, next, h("span", { class: "muted small" }, "← → 키로도 넘깁니다"))), [], { cls: "wide", noDirty: true, onClose: () => document.removeEventListener("keydown", key) });
+  const close = modal(ttl, h("div", {}, body, h("div", { class: "row", style: "margin-top:10px;gap:6px" }, prev, next, h("span", { class: "muted small" }, "← → 키로도 넘깁니다"))), [], { cls: "wide", key: "daylog", noDirty: true, onClose: () => document.removeEventListener("keydown", key) });
   document.addEventListener("keydown", key);
   draw();
 }
@@ -799,17 +908,32 @@ async function periodLog(uid, from, mon) {
     const work = logRows(w).filter(r => r.kind !== "휴가" && r.kind !== "조퇴");
     const tot = work.reduce((a, r) => a + ds.reduce((b, d) => b + (r.hours[d] || 0), 0), 0);
     ttl.textContent = `${whoName(uid)} · ${mon ? `${w.from.slice(0, 4)}년 ${Number(w.from.slice(5, 7))}월` : `${dd(w.from)} ~ ${dd(w.to)}`} 한 일 · 합계 ${fmtH(tot)}h`;
-    body.replaceChildren(rows.length ? h("div", { class: "lg lg3" }, ["날짜", "시간", "한 일"].map(x => h("div", { class: "lh" }, x)),
-      rows.flatMap(r => {
-        const sum = ds.reduce((b, d) => b + (r.hours[d] || 0), 0);
-        return [h("div", { class: "lgp" }, h("span", { class: "lk" }, kindLabel(r)), " ", rowLabel(r)), h("div", { class: "lgp n" }, fmtH(sum) + "h"), h("div", { class: "lgp" }, ""),
-          ...ds.filter(d => r.hours[d] || r.texts?.[d]).flatMap(d => [h("div", { class: "ld" }, dd(d)), h("div", { class: "n" }, r.hours[d] ? fmtH(r.hours[d]) + "h" : "-"), noteCell(r, d)])];
-      })) : h("div", { class: "muted", style: "padding:14px 4px" }, `이 ${mon ? "달" : "주"}에 넣은 시간이 없습니다.`));
+    // 0.8.0: 안 1 — 요약 줄 · 이슈 / 업무 / 기본 구역 · 시간 많은 순 · 비중 막대 · 날짜별 한 일
+    const sumOf = r => ds.reduce((b, d) => b + (r.hours[d] || 0), 0);
+    const secs = [["issue", "이슈", rows.filter(r => r.type === "issue")], ["task", "업무", rows.filter(r => r.type === "task" && !r.fixed)], ["base", "기본 행", rows.filter(r => r.type === "task" && r.fixed)]]
+      .map(([k, t, l]) => [k, t, l.sort((a, b) => sumOf(b) - sumOf(a))]).filter(x => x[2].length);
+    const secTot = l => l.filter(r => r.kind !== "휴가" && r.kind !== "조퇴").reduce((a, r) => a + sumOf(r), 0);
+    const iss = rows.filter(r => r.type === "issue"), tks = rows.filter(r => r.type === "task" && !r.fixed);
+    const item = (r, sec) => {
+      const s = sumOf(r), pct = tot > 0 && r.kind !== "휴가" && r.kind !== "조퇴" ? Math.min(100, s / tot * 100) : 0;
+      const ms = r.type === "task" ? (r.models?.length > 1 ? r.models : r.model ? [r.model] : []) : (r.model ? [r.model] : []);
+      return h("div", { class: "wl-it" },
+        h("div", { class: "wl-hd" }, h("span", { class: "wl-tg " + sec }, sec === "issue" ? "이슈" : sec === "task" ? "업무" : "기본"), h("span", { class: "wl-tt" }, rowLabel(r)),
+          ...ms.map(m => h("span", { class: "wl-m" }, m)), h("span", { class: "spacer" }),
+          pct ? h("span", { class: "wl-bar", title: `이 기간의 ${Math.round(pct)}%` }, h("i", { style: `width:${pct}%` })) : "", h("b", { class: "wl-h" }, fmtH(s) + "h")),
+        ...ds.filter(d => r.hours[d] || r.texts?.[d]).map(d => h("div", { class: "wl-ln" }, h("span", { class: "d" }, dd(d)), h("b", {}, r.hours[d] ? fmtH(r.hours[d]) + "h" : "-"),
+          r.texts?.[d] ? h("span", { class: "pre" }, r.texts[d]) : h("span", { class: "none" }, "-"))));
+    };
+    body.replaceChildren(rows.length ? h("div", {},
+      flt === "all" ? h("div", { class: "wl-sum" }, h("div", {}, h("span", {}, "합계"), h("b", {}, fmtH(tot) + "h")),
+        h("div", {}, h("span", {}, "이슈"), h("b", {}, `${iss.length}건 · ${fmtH(secTot(iss))}h`)), h("div", {}, h("span", {}, "업무"), h("b", {}, `${tks.length}건 · ${fmtH(secTot(tks))}h`))) : "",
+      ...secs.map(([k, t, l]) => h("div", { class: "wl-sec" }, h("div", { class: "wl-st" }, h("b", {}, t), h("span", { class: "muted small" }, `${l.length}건 · ${fmtH(secTot(l))}h`)), ...l.map(r => item(r, k)))))
+      : h("div", { class: "muted", style: "padding:14px 4px" }, `이 ${mon ? "달" : "주"}에 넣은 시간이 없습니다.`));
   };
   const key = e => { if (e.target.closest?.("input,textarea")) return; if (e.key === "ArrowLeft") shift(-1); else if (e.key === "ArrowRight") shift(1); };
-  modal(ttl, h("div", {}, h("div", { class: "row", style: "margin-bottom:8px;gap:8px" }, seg, h("div", { class: "spacer" }), h("span", { class: "muted small" }, "안 적은 줄은 업무 제목을 흐리게 보여 줍니다")), body,
+  modal(ttl, h("div", {}, h("div", { class: "row", style: "margin-bottom:8px;gap:8px" }, seg), body,
     h("div", { class: "row", style: "margin-top:10px;gap:6px" }, h("button", { class: "btn", onclick: () => shift(-1) }, mon ? "◀ 이전 달" : "◀ 이전 주"), h("button", { class: "btn", onclick: () => shift(1) }, mon ? "다음 달 ▶" : "다음 주 ▶"), h("span", { class: "muted small" }, "← → 키로도 넘깁니다"))),
-    [], { cls: "wide", noDirty: true, onClose: () => document.removeEventListener("keydown", key) });
+    [], { cls: "wide", key: "periodlog", noDirty: true, onClose: () => document.removeEventListener("keydown", key) });
   document.addEventListener("keydown", key);
   await load();
 }
@@ -860,7 +984,9 @@ async function taskModal(t0, readonly, after) {
   const dis = readonly;
   const kind = sel(t.fixed ? [t.kind] : ["통상", "기타", "휴가", "조퇴"], t.kind, { disabled: readonly || t.fixed });
   const mList = modelsFor("").concat(t.model_id && !modelsFor("").some(m => m.id === t.model_id) ? M.models.filter(m => m.id === t.model_id) : []);   // 꺼진 · 삭제한 모델이라도 지금 값은 보이게
-  const model = searchSel([["", "공통 (모델 없음)"], ...mList.map(m => [m.id, `${m.name} (${m.part} · ${m.phase || "-"})`])], t.model_id, { disabled: dis });
+  const curIds = taskModelIds(t);
+  const mList2 = mList.concat(M.models.filter(m => curIds.includes(m.id) && !mList.some(x => x.id === m.id)));
+  const model = t.fixed_key === "5" ? h("span", { class: "muted small" }, "외근은 시간 칸에서 모델별로 나눕니다") : modelMulti(mList2, curIds, { disabled: dis });   // 0.8.0
   const title = h("input", { value: t.title || "", disabled: readonly });
   const prog = sel([["", "-"], ...Array.from({ length: 11 }, (_, i) => [i * 10, i * 10 + "%"])], t.progress, { disabled: dis });
   const st = dateInput(t.start, { disabled: dis }), tg = dateInput(t.target, { disabled: dis }), dn = dateInput(t.done, { disabled: dis });
@@ -894,7 +1020,7 @@ async function taskModal(t0, readonly, after) {
     body = tabbed([["f", "업무 내용", form], ["l", `진행 기록 (${t.notes_list.length})`, log]]);
   }
   const btns = readonly ? [] : [{ text: "저장", cls: "pri", fn: async () => {
-    const b = { kind: kind.value, model_id: model.value ? Number(model.value) : null, title: title.value, progress: kind.value === "통상" ? (prog.value === "" ? null : Number(prog.value)) : null,
+    const b = { kind: kind.value, ...(t.fixed_key === "5" ? {} : { models: model.value }), title: title.value, progress: kind.value === "통상" ? (prog.value === "" ? null : Number(prog.value)) : null,
       start: st.value, target: tg.value, done: dn.value, importance: imp.value, category: cat.value, note: note.value };
     if (sumIn) b.summary = sumIn.value;
     if (isNew) {
@@ -912,7 +1038,7 @@ async function taskModal(t0, readonly, after) {
   if (!readonly && !isNew && !t.fixed) btns.unshift(t.hidden
     ? { text: "되살리기", fn: async () => { await api("POST", `/api/tasks/${t.id}/hide`, { hidden: false }); toast("되살렸습니다"); await after(); } }
     : { text: "삭제 (숨김)", cls: "danger", fn: async () => { if (!(await confirmBox("이 업무를 목록에서 숨깁니다.\n넣은 시간은 그대로 남아 집계에 들어가고, '삭제한 업무'에서 되살릴 수 있습니다."))) return false; await api("POST", `/api/tasks/${t.id}/hide`, { hidden: true }); toast("숨겼습니다"); await after(); } });
-  modal(isNew ? "업무 추가" : (readonly ? "업무 보기" : "업무"), body, btns, { modeless: !readonly });
+  modal(isNew ? "업무 추가" : (readonly ? "업무 보기" : "업무"), body, btns, { modeless: !readonly, key: "task" });
   if (isNew) setTimeout(() => title.focus(), 50);
 }
 function tabbed(list) {
@@ -1367,7 +1493,7 @@ async function pageRequests() {
     return h("div", { class: "card req" + (r.status === "완료" ? " done" : "") },
       h("div", { class: "row" }, badge(stCls[r.status], r.status), h("b", {}, mineIn ? `${r.from_name} → 나` : `나 → ${r.to_name}`), h("span", { class: "muted small" }, r.created.slice(0, 16)), h("div", { class: "spacer" }),
         h("button", { class: "btn sm", onclick: async () => { await api("PUT", `/api/requests/${r.id}`, { hide: true }); pageRequests(); } }, "목록에서 숨기기")),
-      h("div", { class: "pre", style: "margin:8px 0" }, r.text),
+      h("div", { class: "req-txt" }, h("div", { class: "pre", style: "margin:8px 0;flex:1" }, r.text), copyBtn(r.text)),
       mineIn ? h("div", {}, reply, h("div", { class: "row", style: "margin-top:6px" }, h("button", { class: "btn sm", onclick: act("확인") }, "확인함"), h("button", { class: "btn sm pri", onclick: act("완료") }, "완료"), r.status !== "대기" ? h("button", { class: "btn sm", onclick: act("대기") }, "대기로 되돌리기") : ""))
         : (r.reply ? h("div", { class: "duty" }, h("b", {}, `답변 · ${r.updated.slice(0, 16)}`), h("div", { class: "pre" }, r.reply)) : ""));
   };
@@ -1386,7 +1512,7 @@ async function pageAssign() {
   const pOrd = p => (part && p === part ? -1 : M.parts.indexOf(p) < 0 ? 99 : M.parts.indexOf(p));
   const people = M.users.filter(u => u.active && !u.gone && u.role !== "lead").sort((a, b) => pOrd(a.part) - pOrd(b.part));
   const title = h("input", { class: "inp", placeholder: "업무명 (예: B모델 EMC 대책 회로 검토)" });
-  const model = searchSel([["", "공통 (모델 없음)"], ...modelsFor("").map(m => [m.id, `${m.name} (${m.part} · ${m.phase || "-"})`])], "");
+  const model = modelMulti(modelsFor(""), []);   // 0.8.0: 모델 여러 개
   const st = dateInput(M.today), tg = dateInput("");
   const imp = sel(["", "상", "중", "하"], "", { class: "inp" }), cat = searchSel([["", "-"], ...M.categories.map(c => [c.name, c.name])], "");
   const summary = h("input", { class: "inp", maxLength: 200, placeholder: "간략한 요약 (받는 사람 팝업에 업무명 · 목표일과 함께 보임)" });
@@ -1397,7 +1523,7 @@ async function pageAssign() {
       h("div", { class: "picks" }, checks.filter(c => c.u.part === pt).map(c => h("label", { class: "pick" }, c.el, " ", c.u.name)))))))),
     h("div", { class: "row", style: "margin-top:12px" }, h("button", { class: "btn pri", onclick: async () => {
       const ids = checks.filter(c => c.el.checked).map(c => c.u.id);
-      try { const r = await api("POST", "/api/assign", { user_ids: ids, title: title.value, model_id: Number(model.value) || null, start: st.value, target: tg.value, importance: imp.value, category: cat.value, note: note.value, summary: summary.value });
+      try { const r = await api("POST", "/api/assign", { user_ids: ids, title: title.value, models: model.value, start: st.value, target: tg.value, importance: imp.value, category: cat.value, note: note.value, summary: summary.value });
         toast(`${r.to.join(", ")} 에게 지정했습니다 (받는 사람 화면에 팝업으로 뜹니다)`); pageAssign(); } catch (e) { toast(e.message, true); }
     } }, "지정하기"), h("span", { class: "muted small" }, "받은 사람의 '내 업무'에 통상 업무로 생기고, 화면 가운데 팝업(업무명 · 요약 · 목표일)과 빨간 점으로 알립니다. 받은 사람도 내용을 고칠 수 있습니다.")));
   const groups = {};
@@ -1637,6 +1763,12 @@ function noLink(i, tag = "span", cls = "") {
 // 0.7.9: 이 PC에 '폴더 바로 열기'를 설치했는지 (PC마다 다르므로 서버가 아니라 이 브라우저에 저장)
 //   관리 > 이슈 폴더에서 'IT가 모든 PC에 배포함'을 켜면, 이 PC에서 따로 끄지 않은 한 바로 열기가 기본
 function folderDirect(v) { try { if (v === undefined) { const x = localStorage.getItem("wm_folder_direct"); return x === null ? M.settings?.folder_direct_all === "1" : x === "1"; } localStorage.setItem("wm_folder_direct", v ? "1" : "0"); } catch { return v === undefined ? M.settings?.folder_direct_all === "1" : false; } }
+// 0.8.0: 서식 없는 글자로 복사
+async function copyText(txt) {
+  try { await navigator.clipboard.writeText(txt); return true; }
+  catch { const t = h("textarea", { style: "position:fixed;opacity:0" }); t.value = txt; document.body.append(t); t.select(); let ok = false; try { ok = document.execCommand("copy"); } catch {} t.remove(); return ok; }
+}
+const copyBtn = (txt, label = "📋 복사") => h("button", { class: "btn sm", title: "내용만 복사 (서식 없이)", onclick: async e => { e.stopPropagation(); toast(await copyText(txt) ? "복사했습니다" : "복사가 막혔습니다. 글을 끌어서 선택해 복사하세요", !1); } }, label);
 async function copyFolder(i) {
   const pth = folderPath(i);
   if (folderDirect()) {   // workfolder: 링크 → PC에 설치한 처리기가 탐색기로 엶

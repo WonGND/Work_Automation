@@ -20,9 +20,9 @@ def login(n):
     s = S(); st, d = s.req("POST", "/api/login", {"login": n, "pw": acc[n]})
     if d.get("must_change"): s.req("POST", "/api/password", {"old": acc[n], "new": "Test!2345"}); acc[n] = "Test!2345"
     return s
-adm = login("홍길동"); mem = login("정시우")
+adm = login("곽원용"); mem = login("곽상윤")
 seed = json.load(open(SEED, encoding="utf-8"))
-me_tasks = [t for t in seed["tasks"] if t["user"].startswith("정시우") and t["kind"] == "통상"]
+me_tasks = [t for t in seed["tasks"] if t["user"].startswith("곽상윤") and t["kind"] == "통상"]
 T = me_tasks[0]
 web = {t["title"]: t for t in mem.req("GET", "/api/tasks")[1]}
 wid = web[T["title"]]["id"]
@@ -64,9 +64,9 @@ check("엑셀 새 이슈 추가", "26-031" in iss)
 st, nx = adm.req("POST", "/api/issues", {"model_id": iss["26-031"]["model_id"], "title": "가져오기 뒤 새 이슈", "members": []})
 check("다음 이슈 번호는 엑셀 번호 다음 (26-032)", st == 200 and nx["no"] == "26-032", nx)
 after_users = {u["login"]: u for u in adm.req("GET", "/api/meta")[1]["users"]}
-check("계정 · 비밀번호 그대로", set(before_users) == set(after_users) and login("정시우") is not None and S().req("POST", "/api/login", {"login": "정시우", "pw": acc["정시우"]})[0] == 200)
+check("계정 · 비밀번호 그대로", set(before_users) == set(after_users) and login("곽상윤") is not None and S().req("POST", "/api/login", {"login": "곽상윤", "pw": acc["곽상윤"]})[0] == 200)
 fixed = db.execute("SELECT user_id, COUNT(*) FROM tasks WHERE fixed=1 GROUP BY user_id").fetchall()
-check("기본 행 4개씩 그대로", all(n == 4 for _, n in fixed), fixed)
+check("기본 행 5개씩 그대로 (0.8.0 외근 포함)", all(n == 5 for _, n in fixed), fixed)
 st, r2 = adm.req("POST", "/api/admin/import", {"seed": s2, "from": "2026-10-12", "to": "2026-11-11"})
 check("같은 파일 두 번 가져와도 늘지 않음", r2["tasksNew"] == 0 and r2["issuesNew"] == 0, r2)
 import glob, os

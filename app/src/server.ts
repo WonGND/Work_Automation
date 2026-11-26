@@ -22,7 +22,7 @@ import { GUIDE } from "./guide_img";
 import { FONT_CSS, FONTS } from "./fonts_kr";   // 0.7.2: Noto Sans KR (tools/mk_fonts.py 가 만듦)
 import { createHash } from "node:crypto";
 
-export const VERSION = "업무관리 0.7.9";
+export const VERSION = "업무관리 0.8.0";
 const args = process.argv.slice(2);
 const ENVK: Record<string, string> = { "--port": "WL_PORT", "--data": "WL_DATA", "--cert": "WL_TLS_CERT", "--key": "WL_TLS_KEY", "--http-port": "WL_HTTP_PORT", "--key-file": "WL_KEY_FILE", "--seed": "WL_SEED" };
 const arg = (k: string, d: string) => { const i = args.indexOf(k); if (i >= 0 && args[i + 1]) return args[i + 1]; const e = ENVK[k] && process.env[ENVK[k]]; return e || d; };
@@ -128,6 +128,7 @@ setTimeout(folders, 10e3); setInterval(folders, 30 * 60e3);
 const CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'";
 // 버전이 바뀌면 모든 사람에게 알림 (우상단 🔔)
 const NOTES: Record<string, string> = {
+  "업무관리 0.8.0": "한 업무에 모델 여러 개 (업무 추가 · 수정 · 업무 지정) · 다중 모델 업무와 새 기본 행 '외근'은 시간을 넣으면 모델별 시간 · 한 일을 나눠 적음 (합계 = 칸 시간 · Esc 면 다중 모델은 똑같이, 외근은 공통) · 업무 로드와 모델별 시간 표는 모델별로 나눈 시간 × 각 모델 배율 · 주간 · 월간 한 일 보기 새 디자인 (요약 · 이슈 / 업무 / 기본 행 구역 · 시간 많은 순 · 비중 막대) · 모든 창 크기 조절 (오른쪽 아래 모서리 · 창마다 기억 · 제목 줄 더블클릭 = 원래 크기 · 공지 · 알림 제외) · 요청 내용 복사 버튼 · 폴더 바로 열기 빠르게 (PowerShell 대신 설치할 때 만드는 작은 실행 파일 · 다시 설치 필요)",
   "업무관리 0.7.9": "이슈 폴더 바로 열기: 내 정보 > '폴더 바로 열기'에서 설치 파일을 받아 PC에 한 번 설치하면 이슈 번호 옆 📁 를 누를 때 탐색기에서 그 폴더가 바로 열림 (workfolder: 링크 · 내 계정에만 설치 · 이슈 폴더 아래만 열고 그 밖은 거부) · 설치 여부는 PC · 브라우저마다 체크 · 설치하지 않은 PC는 지금처럼 경로 복사",
   "업무관리 0.7.8": "HTTPS 인증서: 서버 인증서를 새로 만들 때 발급자 이름을 내부 인증 기관(CA) 인증서에서 그대로 가져옴 (예전 CA 이름과 달라 PC가 '신뢰할 수 없음'으로 보던 문제 고침) · 켤 때 CA와 이어지지 않는 서버 인증서는 자동으로 다시 만듦 · 접속 주소를 정해 두면 컨테이너 내부 주소는 인증서에 넣지 않아, 다시 빌드해도 서버 인증서가 바뀌지 않음",
   "업무관리 0.7.7": "이슈 폴더: 파일 서버가 느리거나 답하지 않을 때 사이트 전체가 멈추던 문제 고침 (파일 서버 작업을 기다리지 않고 따로 처리 · 작업마다 8초 제한 · 넘으면 그 회차를 멈추고 10분 뒤 다시) · 폴더 목록은 회차마다 한 번만 읽음 · 이슈 등록은 폴더를 기다리지 않고 바로 끝남",
@@ -166,6 +167,7 @@ const NOTICE: [string, string[]][] = [
   ["업무관리 0.7.7", ["파일 서버가 느릴 때 사이트가 잠시 멈추던 문제를 고쳤습니다"]],
   ["업무관리 0.7.8", ["'연결이 비공개로 설정되어 있지 않습니다' 경고가 다시 뜨던 문제를 고쳤습니다 (인증서를 다시 설치할 필요 없음)"]],
   ["업무관리 0.7.9", ["내 정보 > '폴더 바로 열기'를 한 번 설치하면 이슈 번호 옆 📁 를 누를 때 폴더가 바로 열립니다"]],
+  ["업무관리 0.8.0", ["한 업무에 모델을 여러 개 고를 수 있고, 시간을 넣으면 모델별로 시간 · 한 일을 나눕니다", "기본 행에 '외근'이 생겼습니다 (시간을 넣고 모델별로 나누기)", "주간 · 월간 한 일 보기가 보기 쉽게 바뀌었습니다", "창 오른쪽 아래 모서리를 끌어 크기를 바꿀 수 있습니다", "받은 요청에 [복사] 버튼이 생겼습니다", "폴더 바로 열기를 쓰는 분은 내 정보에서 다시 설치하면 훨씬 빨라집니다"]],
 ];
 {
   const last = getSetting("last_version", "");

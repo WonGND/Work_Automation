@@ -5,15 +5,17 @@ import { addDays } from "./calc";
 
 export function shortName(full: string) { return full.split(" ")[0]; }
 
-export const DEFAULT_ROWS: [string, string][] = [["기타", "회의·보고"], ["기타", "교육·행정·기타"], ["휴가", "연차·반차"], ["조퇴", "조퇴"]];
+export const DEFAULT_ROWS: [string, string][] = [["기타", "회의·보고"], ["기타", "교육·행정·기타"], ["휴가", "연차·반차"], ["조퇴", "조퇴"], ["기타", "외근"]];   // 0.8.0: 5 = 외근 (칸에서 모델별 나누기)
+// 표에 보이는 순서: 회의·보고 → 외근 → 교육 → 연차 → 조퇴
+export const FIXED_ORDER = "CASE fixed_key WHEN '1' THEN 1 WHEN '5' THEN 2 WHEN '2' THEN 3 WHEN '3' THEN 4 WHEN '4' THEN 5 ELSE 9 END";
 
-// 기본 행 4개 (회의 · 교육 · 연차 · 조퇴). 0.2.1부터 이름을 고칠 수 있어 fixed_key(1~4)로 찾음
+// 기본 행 5개 (회의 · 교육 · 연차 · 조퇴 · 외근). 0.2.1부터 이름을 고칠 수 있어 fixed_key(1~4)로 찾음
 export async function ensureFixedRows(userId: number) {
   for (const [k, [kind, title]] of DEFAULT_ROWS.entries()) {
     const key = String(k + 1);
     const keyed = q1("SELECT id FROM tasks WHERE user_id=? AND fixed_key=?", userId, key);
     if (keyed) { run("UPDATE tasks SET fixed=1, hidden=0 WHERE id=?", keyed.id); continue; }
-    const ex = q1("SELECT id FROM tasks WHERE user_id=? AND kind=? AND title=? AND IFNULL(fixed_key,'')='' ORDER BY fixed DESC, id LIMIT 1", userId, kind, title);
+    const ex = key === "5" ? null : q1("SELECT id FROM tasks WHERE user_id=? AND kind=? AND title=? AND IFNULL(fixed_key,'')='' ORDER BY fixed DESC, id LIMIT 1", userId, kind, title);   // 외근: 각자 만든 '외근' 업무는 그대로 둠
     if (ex) { run("UPDATE tasks SET fixed=1, hidden=0, fixed_key=? WHERE id=?", key, ex.id); continue; }
     if (kind === "휴가" || kind === "조퇴") {
       const any = q1("SELECT id FROM tasks WHERE user_id=? AND kind=? AND hidden=0 AND IFNULL(fixed_key,'')='' ORDER BY fixed DESC, id LIMIT 1", userId, kind);

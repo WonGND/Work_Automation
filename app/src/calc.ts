@@ -44,6 +44,22 @@ export function weightOf(c: Ctx, modelId: number | null): number {
   return c.grades.has(key) ? (c.grades.get(key) || 0) : c.other;
 }
 
+// 0.8.0: 한 칸의 시간을 모델별로 — 나눈 기록이 있으면 그대로, 없고 다중 모델이면 똑같이, 아니면 업무 모델 하나
+export function taskModels(t: any): number[] { try { const a = JSON.parse(t.models || "[]"); return Array.isArray(a) ? a.map(Number).filter(Boolean) : []; } catch { return []; } }
+export function taskParts(t: any, splits?: { model_id: number; hours: number }[]): [number | null, number][] {
+  if (splits && splits.length) return splits.map(x => [x.model_id || null, x.hours]);
+  const ms = taskModels(t);
+  if (ms.length > 1) return ms.map(m => [m, t.hours / ms.length]);
+  return [[t.model_id || null, t.hours]];
+}
+export function splitMap(userId: number, from: string, to: string) {
+  const m = new Map<string, { model_id: number; hours: number; text: string }[]>();
+  for (const x of q(`SELECT s.* FROM task_splits s JOIN tasks t ON t.id=s.task_id WHERE t.user_id=? AND s.date>=? AND s.date<=? ORDER BY s.hours DESC`, userId, from, to)) {
+    const k = x.task_id + "|" + x.date; if (!m.has(k)) m.set(k, []); m.get(k)!.push(x);
+  }
+  return m;
+}
+
 export function isWorkday(c: Ctx, s: string) { const w = dow(s); return w !== 0 && w !== 6 && !c.holidays.has(s); }
 
 function leaveDays(userId: number) {
@@ -75,15 +91,19 @@ export function personStats(c: Ctx, userId: number, from: string, to: string): P
   const daily: Record<string, number> = {}; const models: Record<string, number> = {};
   let leaveH = 0, earlyDays = 0, input = 0, weighted = 0;
   const leaveDay = new Set<string>();
-  const th = q(`SELECT t.kind, t.model_id, h.date, h.hours FROM task_hours h JOIN tasks t ON t.id=h.task_id
+  const th = q(`SELECT t.id, t.kind, t.model_id, t.models, h.date, h.hours FROM task_hours h JOIN tasks t ON t.id=h.task_id
                 WHERE t.user_id=? AND h.date>=? AND h.date<=?`, userId, s, e);
+  const sp = splitMap(userId, s, e);
   for (const r of th) {
     if (r.kind === "휴가") { if (wd.has(r.date)) { leaveH += r.hours; leaveDay.add(r.date); } continue; }
     if (r.kind === "조퇴") { if (wd.has(r.date) && r.hours > 0) { earlyDays++; leaveDay.add(r.date); } continue; }
-    input += r.hours; weighted += r.hours * weightOf(c, r.model_id);
+    input += r.hours;
     daily[r.date] = (daily[r.date] || 0) + r.hours;
-    const mn = r.model_id ? (c.models.get(r.model_id)?.name || "") : "공통·기타";
-    models[mn] = (models[mn] || 0) + r.hours;
+    for (const [mid, h] of taskParts(r, sp.get(r.id + "|" + r.date))) {   // 0.8.0: 모델별로 나눈 시간 × 각 모델 배율
+      weighted += h * weightOf(c, mid);
+      const mn = mid ? (c.models.get(mid)?.name || "") : "공통·기타";
+      models[mn] = (models[mn] || 0) + h;
+    }
   }
   const il = q(`SELECT i.model_id, l.date, l.hours FROM issue_logs l JOIN issues i ON i.id=l.issue_id
                 WHERE l.user_id=? AND l.date>=? AND l.date<=? AND l.hours>0`, userId, s, e);

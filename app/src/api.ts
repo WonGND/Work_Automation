@@ -2,8 +2,8 @@
 import { db, q, q1, run, getSetting, setSetting, audit, backup, listBackups, BACKUP_DIR, notify, DATA_DIR, IMG_DIR } from "./db";
 import { enc, randCode, tempPw } from "./secret";
 import { sendMail, mailReady } from "./mail";
-import { ctx, personStats, periodRange, today, addDays, scheduleState, num, isWorkday, dow, weightOf } from "./calc";
-import { ensureFixedRows, importWork } from "./seed";
+import { ctx, personStats, periodRange, today, addDays, scheduleState, num, isWorkday, dow, weightOf, taskModels } from "./calc";
+import { ensureFixedRows, importWork, FIXED_ORDER } from "./seed";
 import { missReminder } from "./remind";
 import { join } from "node:path";
 import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -188,6 +188,12 @@ function checkTaskInput(b: any, isNew: boolean) {
   if (isNew || "kind" in b) { if (!["통상", "기타", "휴가", "조퇴"].includes(b.kind)) err(400, "구분은 통상 · 기타 · 휴가 · 조퇴 중에서 고릅니다 (이슈는 PL이 등록)"); out.kind = b.kind; }
   if (isNew || "title" in b) { out.title = str(b.title, 200); if (!out.title) err(400, "업무명을 입력하세요"); }
   if ("model_id" in b) { out.model_id = b.model_id ? Number(b.model_id) : null; if (out.model_id && !q1("SELECT id FROM models WHERE id=?", out.model_id)) err(400, "모델 목록에 없는 모델입니다"); }
+  if (Array.isArray(b.models)) {   // 0.8.0: 모델 여러 개 — 2개 이상이면 models 에 담고 model_id 는 첫 모델
+    const ids = Array.from(new Set(b.models.map(Number).filter(Boolean))) as number[];
+    if (ids.length > 10) err(400, "모델은 10개까지 고를 수 있습니다");
+    for (const id of ids) if (!q1("SELECT id FROM models WHERE id=?", id)) err(400, "모델 목록에 없는 모델입니다");
+    out.model_id = ids[0] ?? null; out.models = ids.length > 1 ? JSON.stringify(ids) : "";
+  }
   if ("progress" in b) { const p = b.progress === "" || b.progress == null ? null : Number(b.progress); if (p !== null && (!(p >= 0 && p <= 100) || p % 10 !== 0)) err(400, "진행률은 0~100% (10% 단위)"); out.progress = p; }
   for (const k of ["start", "target", "done"]) if (k in b) out[k] = dOrNull(b[k]);
   if (out.start && out.target && out.target < out.start) err(400, "목표 마감일이 시작일보다 빠릅니다");
@@ -210,7 +216,7 @@ function checkHours(h: any) {
 function weekData(uid: number, from: string, n = 7) {   // n = 7 (주간) 또는 그 달의 날 수 (0.6.0 월간)
   const c = ctx(); const days = Array.from({ length: n }, (_, k) => addDays(from, k)); const to = days[n - 1];
   const t = today(); const hstart = getSetting("hstart", "2026-10-12");
-  const tasks = q(`SELECT * FROM tasks WHERE user_id=? AND (hidden=0 OR id IN (SELECT task_id FROM task_hours WHERE date BETWEEN ? AND ?)) ORDER BY fixed DESC, ord, id`, uid, from, to);
+  const tasks = q(`SELECT * FROM tasks WHERE user_id=? AND (hidden=0 OR id IN (SELECT task_id FROM task_hours WHERE date BETWEEN ? AND ?)) ORDER BY fixed DESC, ${FIXED_ORDER}, ord, id`, uid, from, to);
   const rows: any[] = [];
   for (const tk of tasks) {
     const fin = !!tk.done || tk.progress === 100;
@@ -219,7 +225,13 @@ function weekData(uid: number, from: string, n = 7) {   // n = 7 (주간) 또는
     const started = !tk.start || tk.start <= to;
     if (!tk.fixed && !has && (tk.hidden || (fin && tk.done && tk.done < from) || !started)) continue;
     const texts = Object.fromEntries(q("SELECT date,text FROM task_notes WHERE task_id=? AND date BETWEEN ? AND ? AND text<>''", tk.id, from, to).map((r: any) => [r.date, r.text]));
-    rows.push({ type: "task", id: tk.id, kind: tk.kind, title: tk.title, model: tk.model_id ? c.models.get(tk.model_id)?.name : "", fixed: tk.fixed, hidden: tk.hidden, done: fin, doneAt: fin ? (tk.done || "") : "", hours: hrs, texts,
+    // 0.8.0: 다중 모델 · 외근 — 모델 목록과 칸별 나눈 시간
+    const mids = taskModels(tk);
+    const splits: Record<string, any[]> = {};
+    for (const x of q("SELECT date, model_id, hours, text FROM task_splits WHERE task_id=? AND date BETWEEN ? AND ? ORDER BY hours DESC", tk.id, from, to))
+      (splits[x.date] ||= []).push({ model_id: x.model_id, model: x.model_id ? (c.models.get(x.model_id)?.name || "") : "공통", hours: x.hours, text: x.text || "" });
+    rows.push({ type: "task", id: tk.id, kind: tk.kind, title: tk.title, model: tk.model_id ? c.models.get(tk.model_id)?.name : "", fixed: tk.fixed, fixedKey: tk.fixed_key || "",
+      modelIds: mids.length > 1 ? mids : (tk.model_id ? [tk.model_id] : []), models: mids.length > 1 ? mids.map(id => c.models.get(id)?.name || "") : [], split: mids.length > 1 || tk.fixed_key === "5", splits, hidden: tk.hidden, done: fin, doneAt: fin ? (tk.done || "") : "", hours: hrs, texts,
       assigned: tk.assigned_by ? (q1("SELECT name FROM users WHERE id=?", tk.assigned_by)?.name || "") : "", progress: tk.progress, flag: tk.flag ? 1 : 0 });
   }
   const iss = q(`SELECT i.*, m.role, m.flag mflag FROM issues i JOIN issue_members m ON m.issue_id=i.id WHERE m.user_id=? ORDER BY i.no`, uid);
@@ -483,6 +495,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     const r = run(`INSERT INTO tasks(user_id,kind,model_id,title,progress,start,target,done,importance,category,note,ord) VALUES(?,?,?,?,?,?,?,?,?,?,?,(SELECT IFNULL(MAX(ord),0)+1 FROM tasks WHERE user_id=?))`,
       me.id, v.kind, v.model_id ?? null, v.title, v.kind === "통상" ? v.progress ?? 0 : null, v.start ?? null, v.target ?? null, v.done ?? null, v.importance ?? "", v.category ?? "", v.note ?? "", me.id);
     const tid = Number(r.lastInsertRowid);
+    if (v.models) run("UPDATE tasks SET models=? WHERE id=?", v.models, tid);   // 0.8.0
     for (const x of hrs) {
       run("INSERT INTO task_hours(task_id,date,hours) VALUES(?,?,?)", tid, x.date, x.hours);
       if (x.text) run("INSERT INTO task_notes(task_id,date,text) VALUES(?,?,?)", tid, x.date, x.text);
@@ -514,7 +527,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       if ("summary" in body && t.assigned_by === me.id) { v.summary = str(body.summary, 200); if (!keys.includes("summary")) keys.push("summary"); }
       run(`UPDATE tasks SET ${keys.map(k => k + "=?").join(",")}, updated=datetime('now','localtime') WHERE id=?`, ...keys.map(k => v[k]), t.id);
       audit(me.id, "업무 수정", `task ${t.id}`, { before: Object.fromEntries(keys.map(k => [k, t[k]])), after: v });
-      const chg = ["title", "model_id", "start", "target", "summary", "note", "importance"].filter(k => k in v && (v[k] ?? "") !== (t[k] ?? ""));
+      const chg = ["title", "model_id", "models", "start", "target", "summary", "note", "importance"].filter(k => k in v && (v[k] ?? "") !== (t[k] ?? ""));
       if (t.user_id !== me.id && chg.length) {   // 0.7.0: 다른 사람(지정한 PL · 팀장 · 마스터)이 내 업무를 바꿈
         const n = q1("SELECT * FROM tasks WHERE id=?", t.id);
         run("UPDATE tasks SET flag=1 WHERE id=?", t.id);
@@ -547,6 +560,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
         if (!canAssignTo(me, u)) err(403, `${u?.name || id}: 지정할 수 없는 사람입니다`);
         run(`INSERT INTO tasks(user_id,kind,model_id,title,progress,start,target,done,importance,category,note,ord,assigned_by,assign_group,summary,flag) VALUES(?,?,?,?,0,?,?,NULL,?,?,?,(SELECT IFNULL(MAX(ord),0)+1 FROM tasks WHERE user_id=?),?,?,?,?)`,
           id, "통상", v.model_id ?? null, v.title, v.start ?? null, v.target ?? null, v.importance ?? "", v.category ?? "", v.note ?? "", id, me.id, grp, summary, id !== me.id ? 1 : 0);
+        if (v.models) run("UPDATE tasks SET models=? WHERE id=last_insert_rowid()", v.models);   // 0.8.0
         made.push(u.name);
         if (id !== me.id) notify(id, "업무", `${me.name} 이(가) 업무를 지정했습니다: ${v.title}${v.target ? ` (목표 ${v.target})` : ""}`, "#/me",
           { pop: true, data: { what: "업무 지정", by: me.name, 제목: v.title, 요약: summary, 목표일: v.target || "", 모델: v.model_id ? q1("SELECT name FROM models WHERE id=?", v.model_id)?.name || "" : "" } });
@@ -583,7 +597,7 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     if (!text) err(400, "요청 내용을 적어 주세요");
     const r = run("INSERT INTO requests(from_id,to_id,text) VALUES(?,?,?)", me.id, to, text);
     audit(me.id, "요청 보냄", String(to), { text });
-    notify(to, "요청", `${me.name} 의 요청: ${text.slice(0, 80)}`, "#/requests", { pop: true, data: { what: "요청 도착", by: me.name, 내용: text.slice(0, 400) } });
+    notify(to, "요청", `${me.name} 의 요청: ${text.slice(0, 80)}`, "#/requests", { pop: true, data: { what: "요청 도착", by: me.name, 내용: text.slice(0, 2000) } });   // 0.8.0: 복사할 수 있게 전체
     return json(reqOut(q1("SELECT * FROM requests WHERE id=?", Number(r.lastInsertRowid))));
   }
   const mrq = p.match(/^\/api\/requests\/(\d+)$/);
@@ -705,6 +719,26 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       const old = q1("SELECT hours FROM task_hours WHERE task_id=? AND date=?", t.id, date)?.hours ?? 0;
       if (h === 0) run("DELETE FROM task_hours WHERE task_id=? AND date=?", t.id, date);
       else run("INSERT INTO task_hours(task_id,date,hours) VALUES(?,?,?) ON CONFLICT(task_id,date) DO UPDATE SET hours=excluded.hours", t.id, date, h);
+      // 0.8.0: 모델별 나누기 (다중 모델 업무 · 외근). 합계가 칸 시간과 같아야 저장. 시간만 바뀌고 나누기가 없으면 예전 나누기는 지움 (똑같이 나누기로 돌아감)
+      if (Array.isArray(body.splits)) {
+        const ok = taskModels(t);
+        const list = body.splits.map((x: any) => ({ m: Number(x.model_id) || 0, h: checkHours(x.hours), txt: str(x.text, 500) })).filter((x: any) => x.h > 0);
+        const seen = new Set<number>();
+        for (const x of list) {
+          if (seen.has(x.m)) err(400, "같은 모델이 두 줄 있습니다"); seen.add(x.m);
+          if (x.m && !q1("SELECT id FROM models WHERE id=?", x.m)) err(400, "모델 목록에 없는 모델입니다");
+          if (t.fixed_key !== "5" && ok.length > 1 && !ok.includes(x.m)) err(400, "이 업무의 모델이 아닙니다");
+        }
+        const sum = list.reduce((a: number, x: any) => a + x.h, 0);
+        if (h > 0 && list.length && Math.abs(sum - h) > 1e-9) err(400, `모델별 시간 합계(${sum}h)가 칸 시간(${h}h)과 다릅니다`);
+        run("DELETE FROM task_splits WHERE task_id=? AND date=?", t.id, date);
+        if (h > 0) for (const x of list) run("INSERT INTO task_splits(task_id,date,model_id,hours,text) VALUES(?,?,?,?,?)", t.id, date, x.m, x.h, x.txt);
+        if (!("text" in body)) {   // 칸의 '한 일' = 모델별 한 일을 이어 붙임 (다른 화면 · 주황 ✎ 그대로 쓰도록)
+          const c2 = ctx();
+          body.text = list.filter((x: any) => x.txt).map((x: any) => `[${x.m ? (c2.models.get(x.m)?.name || "") : "공통"} ${x.h}h] ${x.txt}`).join(" / ");
+        }
+        audit(me.id, "모델별 나누기", `task ${t.id} ${date}`, list.map((x: any) => `${x.m || "공통"} ${x.h}h`).join(", "));
+      } else if (old !== h) run("DELETE FROM task_splits WHERE task_id=? AND date=?", t.id, date);
       if ("text" in body) {   // 그날 한 일 (통상 · 기타 업무)
         const txt = str(body.text, 1000); const was = q1("SELECT text FROM task_notes WHERE task_id=? AND date=?", t.id, date)?.text || "";
         if (!txt) run("DELETE FROM task_notes WHERE task_id=? AND date=?", t.id, date);

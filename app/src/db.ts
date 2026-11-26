@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS issue_logs (
   updated TEXT DEFAULT (datetime('now','localtime')), PRIMARY KEY (issue_id, user_id, date));
 CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, at TEXT DEFAULT (datetime('now','localtime')), user_id INTEGER, action TEXT, target TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS task_notes (task_id INTEGER NOT NULL, date TEXT NOT NULL, text TEXT DEFAULT '', updated TEXT DEFAULT (datetime('now','localtime')), PRIMARY KEY (task_id, date));
+-- 0.8.0: 한 칸(업무 · 날짜)의 시간을 모델별로 나눈 것 (다중 모델 업무 · 외근). model_id 0 = 공통. 합계 = task_hours.hours
+CREATE TABLE IF NOT EXISTS task_splits (task_id INTEGER NOT NULL, date TEXT NOT NULL, model_id INTEGER NOT NULL, hours REAL NOT NULL, text TEXT DEFAULT '', PRIMARY KEY (task_id, date, model_id));
 CREATE TABLE IF NOT EXISTS user_prefs (user_id INTEGER NOT NULL, key TEXT NOT NULL, value TEXT, PRIMARY KEY (user_id, key));
 CREATE INDEX IF NOT EXISTS ix_th_date ON task_hours(date);
 CREATE INDEX IF NOT EXISTS ix_il_user ON issue_logs(user_id, date);
@@ -125,6 +127,8 @@ function migrate() {
   addCol("issues", "items", "TEXT DEFAULT '{}'");
   // 0.7.6: 파일 서버의 이슈 폴더 (/share 기준 상대 경로, 예: G8/26-012 고객사 ...) · 비어 있으면 아직 없음
   addCol("issues", "folder", "TEXT DEFAULT ''");
+  // 0.8.0: 한 업무에 모델 여러 개 (JSON 배열 · 2개 이상일 때만). model_id 는 첫 모델 (예전 화면 · 엑셀과 맞춤)
+  addCol("tasks", "models", "TEXT DEFAULT ''");
   db.exec(`CREATE TABLE IF NOT EXISTS notifs (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT, text TEXT, link TEXT DEFAULT '', created TEXT DEFAULT (datetime('now','localtime')), read INTEGER DEFAULT 0);
     CREATE INDEX IF NOT EXISTS ix_notif_user ON notifs(user_id, read);
     CREATE TABLE IF NOT EXISTS pw_resets (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, code_hash TEXT, expires TEXT, tries INTEGER DEFAULT 0, used INTEGER DEFAULT 0, created TEXT DEFAULT (datetime('now','localtime')));`);   // 0.7.0: 가운데 팝업(pop · ack) · 공지 · 지정 업무 요약 · 새로 지정/바뀐 표시(빨간 점: 1 = 새 것, 2 = 탭은 봄, 0 = 봄)
