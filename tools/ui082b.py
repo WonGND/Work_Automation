@@ -58,16 +58,15 @@ async def main2():
         for i, (hh, tx) in enumerate((("2", "주간 회의"), ("1.5", "고객 회의"))):
             await c.nth(i).click(); await c.nth(i).fill(hh); await pg.keyboard.press("Tab"); await pg.wait_for_timeout(400)
             if await pg.locator(".note-inl input").count(): await pg.locator(".note-inl input").fill(tx); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(400)
-        await pg.locator(".week thead th.dh").first.click() if await pg.locator(".week thead th.dh").count() else None
+        await pg.locator(".week thead th.day-lnk").first.click()
         await pg.wait_for_timeout(400)
-        day_ok = await pg.locator(".modal .lg.lg4").count()
+        chk("그날 한 일 = 주간 양식 (요약 · 구역 · 항목)", await pg.locator(".modal .wl-sum").count() == 1 and await pg.locator(".modal .wl-it").count() >= 1 and await pg.locator(".modal .lg.lg4").count() == 0)
+        chk("그날 한 일 줄에 적은 글", "주간 회의" in await pg.locator(".modal .wl-it").first.inner_text())
         await pg.screenshot(path=f"{OUT}/V082c_그날.png")
         for _ in range(2):
             if await pg.locator(".modal").count(): await pg.keyboard.press("Escape"); await pg.wait_for_timeout(300)
         await pg.locator("button", has_text="주간 한 일 보기").first.click(); await pg.wait_for_timeout(800)
-        n = await pg.locator(".modal .pl-day .lg.lg4").count()
-        chk(f"주간 한 일 = 날짜마다 그날 한 일 표 ({n}일)", n >= 2 and await pg.locator(".modal .wl-it").count() == 0)
-        chk("표 머리 같음", await pg.locator(".modal .pl-day").first.locator(".lh").all_inner_texts() == ["구분", "업무 · 이슈", "시간", "한 일"])
+        chk("주간 한 일 = 0.8.1 양식 그대로 (날짜별 줄)", await pg.locator(".modal .wl-it").count() >= 1 and await pg.locator(".modal .wl-ln .d").count() >= 2 and await pg.locator(".modal .pl-day").count() == 0)
         await pg.screenshot(path=f"{OUT}/V082c_주간.png")
         chk("화면 오류 없음 (2)", not errs, errs)
         await b.close()

@@ -789,7 +789,5 @@ body.mresizing,body.mresizing *{user-select:none!important}
 .req-txt{display:flex;gap:8px;align-items:flex-start}
 .req-txt .btn{margin-top:8px;flex:none}
 
-/* 0.8.2: 주간 · 월간 한 일 = 그날 한 일 표를 날짜마다 */
-.pl-day{margin-bottom:14px}
-.pl-dh{display:flex;align-items:baseline;gap:8px;padding:6px 2px;border-bottom:2px solid var(--line);margin-bottom:4px}
-.pl-dh b{font-size:14px}
+/* 0.8.2.1: 그날 한 일 = 주간 한 일 양식 (한 일 한 줄) */
+.wl-ln.one{grid-template-columns:1fr}

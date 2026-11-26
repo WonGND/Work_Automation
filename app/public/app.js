@@ -943,10 +943,32 @@ const rowLabel = r => r.type === "issue" ? [h("b", {}, r.no + " "), r.title] : r
 const kindLabel = r => r.type === "issue" ? "이슈" : r.fixed ? "기본" : "업무";
 const noteCell = (r, d) => r.texts?.[d] ? h("div", { class: "pre" }, r.texts[d]) : h("div", { class: "none", title: "한 일을 적지 않아 업무 제목을 보여 줍니다" }, r.title);
 const whoName = uid => (M.users.find(u => u.id === uid)?.name || "").trim();
-// 0.8.2: 그날 한 일 표 (그날 한 일 · 주간 · 월간 한 일 보기가 같은 양식)
-const dayTable = (rows, d) => h("div", { class: "lg lg4" }, ["구분", "업무 · 이슈", "시간", "한 일"].map(x => h("div", { class: "lh" }, x)),
-  rows.flatMap(r => [h("div", { class: "lk" }, kindLabel(r)), h("div", {}, rowLabel(r)), h("div", { class: "n" }, r.hours[d] ? fmtH(r.hours[d]) + "h" : "-"), noteCell(r, d)]));
-const dayTot = (rows, d) => rows.reduce((a, r) => a + (r.kind === "휴가" || r.kind === "조퇴" ? 0 : (r.hours[d] || 0)), 0);
+// 0.8.0 주간 한 일 양식 (요약 · 이슈 / 업무 / 기본 행 구역 · 시간 많은 순 · 비중 막대 · 모델 칩 · 한 일)
+// 0.8.2.1: 그날 한 일(날짜를 누르면 뜨는 창)도 같은 양식 — oneDay 이면 날짜 · 시간 없이 한 일만
+function wlView(rows, ds, tot, showSum, oneDay) {
+  const sumOf = r => ds.reduce((b, d) => b + (r.hours[d] || 0), 0);
+  const secs = [["issue", "이슈", rows.filter(r => r.type === "issue")], ["task", "업무", rows.filter(r => r.type === "task" && !r.fixed)], ["base", "기본 행", rows.filter(r => r.type === "task" && r.fixed)]]
+    .map(([k, t, l]) => [k, t, l.sort((a, b) => sumOf(b) - sumOf(a))]).filter(x => x[2].length);
+  const secTot = l => l.filter(r => r.kind !== "휴가" && r.kind !== "조퇴").reduce((a, r) => a + sumOf(r), 0);
+  const iss = rows.filter(r => r.type === "issue"), tks = rows.filter(r => r.type === "task" && !r.fixed);
+  const item = (r, sec) => {
+    const s = sumOf(r), pct = tot > 0 && r.kind !== "휴가" && r.kind !== "조퇴" ? Math.min(100, s / tot * 100) : 0;
+    const ms = r.type === "task" ? (r.models?.length > 1 ? r.models : r.model ? [r.model] : []) : (r.model ? [r.model] : []);
+    const lines = oneDay
+      ? [h("div", { class: "wl-ln one" }, r.texts?.[ds[0]] ? h("span", { class: "pre" }, r.texts[ds[0]]) : h("span", { class: "none" }, "한 일을 적지 않았습니다"))]
+      : ds.filter(d => r.hours[d] || r.texts?.[d]).map(d => h("div", { class: "wl-ln" }, h("span", { class: "d" }, dd(d)), h("b", {}, r.hours[d] ? fmtH(r.hours[d]) + "h" : "-"),
+          r.texts?.[d] ? h("span", { class: "pre" }, r.texts[d]) : h("span", { class: "none" }, "-")));
+    return h("div", { class: "wl-it" },
+      h("div", { class: "wl-hd" }, h("span", { class: "wl-tg " + sec }, sec === "issue" ? "이슈" : sec === "task" ? "업무" : "기본"), h("span", { class: "wl-tt" }, rowLabel(r)),
+        ...ms.map(m => h("span", { class: "wl-m" }, m)), h("span", { class: "spacer" }),
+        pct ? h("span", { class: "wl-bar", title: `${oneDay ? "이날" : "이 기간"}의 ${Math.round(pct)}%` }, h("i", { style: `width:${pct}%` })) : "", h("b", { class: "wl-h" }, fmtH(s) + "h")),
+      ...lines);
+  };
+  return h("div", {},
+    showSum ? h("div", { class: "wl-sum" }, h("div", {}, h("span", {}, "합계"), h("b", {}, fmtH(tot) + "h")),
+      h("div", {}, h("span", {}, "이슈"), h("b", {}, `${iss.length}건 · ${fmtH(secTot(iss))}h`)), h("div", {}, h("span", {}, "업무"), h("b", {}, `${tks.length}건 · ${fmtH(secTot(tks))}h`))) : "",
+    ...secs.map(([k, t, l]) => h("div", { class: "wl-sec" }, h("div", { class: "wl-st" }, h("b", {}, t), h("span", { class: "muted small" }, `${l.length}건 · ${fmtH(secTot(l))}h`)), ...l.map(r => item(r, k)))));
+}
 function dayLog(w, date, uid) {
   const days = w.days.map(d => d.date); let k = days.indexOf(date);
   const body = h("div", { class: "log-pop" });
@@ -957,8 +979,8 @@ function dayLog(w, date, uid) {
     const tot = rows.reduce((a, r) => a + (r.kind === "휴가" || r.kind === "조퇴" ? 0 : (r.hours[d] || 0)), 0);
     setTitle(`${whoName(uid)} · ${dd(d)} 한 일 · 합계 ${fmtH(tot)}h`);
     body.replaceChildren(
-      h("div", { class: "muted small", style: "margin-bottom:8px" }, "시간 입력 표에서 ✎로 적은 내용을 그대로 보여 줍니다. 안 적은 줄은 업무 제목을 흐리게 보여 줍니다."),
-      rows.length ? dayTable(rows, d)
+      h("div", { class: "muted small", style: "margin-bottom:8px" }, "시간 입력 표에서 ✎로 적은 내용을 그대로 보여 줍니다."),
+      rows.length ? wlView(rows, [d], tot, true, true)
         : h("div", { class: "muted", style: "padding:14px 4px" }, "이날 넣은 시간이 없습니다."));
     prev.disabled = k <= 0; next.disabled = k >= days.length - 1;
     prev.textContent = k > 0 ? `◀ ${dd(days[k - 1])}` : "◀"; next.textContent = k < days.length - 1 ? `${dd(days[k + 1])} ▶` : "▶";
@@ -985,12 +1007,8 @@ async function periodLog(uid, from, mon) {
     const work = logRows(w).filter(r => r.kind !== "휴가" && r.kind !== "조퇴");
     const tot = work.reduce((a, r) => a + ds.reduce((b, d) => b + (r.hours[d] || 0), 0), 0);
     ttl.textContent = `${whoName(uid)} · ${mon ? `${w.from.slice(0, 4)}년 ${Number(w.from.slice(5, 7))}월` : `${dd(w.from)} ~ ${dd(w.to)}`} 한 일 · 합계 ${fmtH(tot)}h`;
-    // 0.8.2: 그날 한 일(날짜를 누르면 뜨는 창)과 같은 양식 — 날짜마다 '구분 · 업무 · 이슈 · 시간 · 한 일' 표를 차례로
-    const daysWith = ds.filter(d => rows.some(r => r.hours[d] || r.texts?.[d]));
-    body.replaceChildren(daysWith.length ? h("div", {},
-      h("div", { class: "muted small", style: "margin-bottom:8px" }, "시간 입력 표에서 ✎로 적은 내용을 그대로 보여 줍니다. 안 적은 줄은 업무 제목을 흐리게 보여 줍니다."),
-      ...daysWith.map(d => { const rs = rows.filter(r => r.hours[d] || r.texts?.[d]); return h("div", { class: "pl-day" },
-        h("div", { class: "pl-dh" }, h("b", {}, dd(d)), h("span", { class: "muted small" }, `합계 ${fmtH(dayTot(rs, d))}h`)), dayTable(rs, d)); }))
+    // 0.8.0: 안 1 — 요약 줄 · 이슈 / 업무 / 기본 구역 · 시간 많은 순 · 비중 막대 · 날짜별 한 일 (0.8.2.1: 그날 한 일과 함께 wlView)
+    body.replaceChildren(rows.length ? wlView(rows, ds, tot, flt === "all", false)
       : h("div", { class: "muted", style: "padding:14px 4px" }, `이 ${mon ? "달" : "주"}에 넣은 시간이 없습니다.`));
   };
   const key = e => { if (e.target.closest?.("input,textarea")) return; if (e.key === "ArrowLeft") shift(-1); else if (e.key === "ArrowRight") shift(1); };
