@@ -29,6 +29,16 @@ function json(data: any, status = 200) { return new Response(JSON.stringify(data
 const isDate = (s: any) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const dOrNull = (s: any) => (s === "" || s == null ? null : isDate(s) ? s : err(400, `날짜 형식이 아닙니다: ${s} (예: 2026-11-04)`));
 const str = (s: any, max = 2000) => (s == null ? "" : String(s).slice(0, max).trim());
+// 0.8.1: 모델별 나누기를 풀 때 — 나누기 지우고, 그날 한 일의 [모델 Xh] 에서 시간만 떼어 [모델] 로 (글은 남김)
+const stripSplitTag = (t: string) => String(t || "").replace(/\[([^\[\]]{0,40}?) [0-9.]+h\]/g, "[$1]").trim();
+function unsplit(taskId: number, date: string, by: number) {
+  if (!q1("SELECT 1 FROM task_splits WHERE task_id=? AND date=?", taskId, date)) return false;
+  run("DELETE FROM task_splits WHERE task_id=? AND date=?", taskId, date);
+  const n = q1("SELECT text FROM task_notes WHERE task_id=? AND date=?", taskId, date);
+  if (n?.text) { const t2 = stripSplitTag(n.text); if (t2 !== n.text) { if (t2) run("UPDATE task_notes SET text=? WHERE task_id=? AND date=?", t2, taskId, date); else run("DELETE FROM task_notes WHERE task_id=? AND date=?", taskId, date); } }
+  audit(by, "모델별 나누기 풀림", `task ${taskId} ${date}`, "");
+  return true;
+}
 
 // ── 접속 방식 (HTTPS · 프록시) : server.ts 에서 설정 ──
 export const NET = { trustProxy: false, httpsOnly: false };
@@ -511,7 +521,8 @@ export async function handle(req: Request, url: URL): Promise<Response> {
     if (m === "GET") {
       if (!canSeeUser(me, t.user_id) && t.assigned_by !== me.id) err(403, "볼 수 없습니다");
       return json({ ...taskOut(t), notes_list: q("SELECT n.date, n.text, IFNULL(h.hours,0) hours FROM task_notes n LEFT JOIN task_hours h ON h.task_id=n.task_id AND h.date=n.date WHERE n.task_id=? AND n.text<>'' ORDER BY n.date DESC", t.id),
-        hours_list: q("SELECT date, hours FROM task_hours WHERE task_id=? ORDER BY date DESC LIMIT 60", t.id), canEdit: canEditTask(me, t) });
+        hours_list: q("SELECT date, hours FROM task_hours WHERE task_id=? ORDER BY date DESC LIMIT 60", t.id), canEdit: canEditTask(me, t),
+        split_dates: q("SELECT date, GROUP_CONCAT(model_id) ms FROM task_splits WHERE task_id=? GROUP BY date ORDER BY date", t.id).map((x: any) => ({ date: x.date, models: String(x.ms).split(",").map(Number) })) });
     }
     if (!canEditTask(me, t)) err(403, "본인 업무만 고칠 수 있습니다");
     if (mt[2] && m === "POST") {
@@ -527,6 +538,12 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       if ("summary" in body && t.assigned_by === me.id) { v.summary = str(body.summary, 200); if (!keys.includes("summary")) keys.push("summary"); }
       run(`UPDATE tasks SET ${keys.map(k => k + "=?").join(",")}, updated=datetime('now','localtime') WHERE id=?`, ...keys.map(k => v[k]), t.id);
       audit(me.id, "업무 수정", `task ${t.id}`, { before: Object.fromEntries(keys.map(k => [k, t[k]])), after: v });
+      // 0.8.1: 모델을 바꾸면 빠진 모델이 들어간 날의 모델별 나누기를 푼다 (한 모델이 되면 전부). 한 일은 [모델] 표시로 남김
+      if (("models" in v || "model_id" in v) && t.fixed_key !== "5") {
+        const nt = q1("SELECT * FROM tasks WHERE id=?", t.id); const keep = taskModels(nt);
+        for (const d of q("SELECT DISTINCT date FROM task_splits WHERE task_id=?", t.id).map((x: any) => x.date))
+          if (keep.length < 2 || q("SELECT model_id FROM task_splits WHERE task_id=? AND date=?", t.id, d).some((x: any) => !keep.includes(x.model_id))) unsplit(t.id, d, me.id);
+      }
       const chg = ["title", "model_id", "models", "start", "target", "summary", "note", "importance"].filter(k => k in v && (v[k] ?? "") !== (t[k] ?? ""));
       if (t.user_id !== me.id && chg.length) {   // 0.7.0: 다른 사람(지정한 PL · 팀장 · 마스터)이 내 업무를 바꿈
         const n = q1("SELECT * FROM tasks WHERE id=?", t.id);
@@ -717,35 +734,44 @@ export async function handle(req: Request, url: URL): Promise<Response> {
       const t = q1("SELECT * FROM tasks WHERE id=?", Number(body.id)); if (!t) err(404, "없는 업무입니다");
       if (t.user_id !== me.id && me.role !== "master") err(403, "본인 시간만 넣을 수 있습니다");
       const old = q1("SELECT hours FROM task_hours WHERE task_id=? AND date=?", t.id, date)?.hours ?? 0;
-      if (h === 0) run("DELETE FROM task_hours WHERE task_id=? AND date=?", t.id, date);
-      else run("INSERT INTO task_hours(task_id,date,hours) VALUES(?,?,?) ON CONFLICT(task_id,date) DO UPDATE SET hours=excluded.hours", t.id, date, h);
-      // 0.8.0: 모델별 나누기 (다중 모델 업무 · 외근). 합계가 칸 시간과 같아야 저장. 시간만 바뀌고 나누기가 없으면 예전 나누기는 지움 (똑같이 나누기로 돌아감)
+      // 0.8.1: 모델별 나누기는 먼저 전부 검사한 뒤 쓴다 (예전에는 시간을 먼저 쓰고 검사 → 검사에 걸리면 시간만 바뀐 채 남았음)
+      let list: any[] | null = null;
       if (Array.isArray(body.splits)) {
         const ok = taskModels(t);
-        const list = body.splits.map((x: any) => ({ m: Number(x.model_id) || 0, h: checkHours(x.hours), txt: str(x.text, 500) })).filter((x: any) => x.h > 0);
+        list = body.splits.map((x: any) => ({ m: Number(x.model_id) || 0, h: checkHours(x.hours), txt: str(x.text, 500) })).filter((x: any) => x.h > 0);
         const seen = new Set<number>();
-        for (const x of list) {
+        for (const x of list!) {
           if (seen.has(x.m)) err(400, "같은 모델이 두 줄 있습니다"); seen.add(x.m);
           if (x.m && !q1("SELECT id FROM models WHERE id=?", x.m)) err(400, "모델 목록에 없는 모델입니다");
           if (t.fixed_key !== "5" && ok.length > 1 && !ok.includes(x.m)) err(400, "이 업무의 모델이 아닙니다");
         }
-        const sum = list.reduce((a: number, x: any) => a + x.h, 0);
-        if (h > 0 && list.length && Math.abs(sum - h) > 1e-9) err(400, `모델별 시간 합계(${sum}h)가 칸 시간(${h}h)과 다릅니다`);
-        run("DELETE FROM task_splits WHERE task_id=? AND date=?", t.id, date);
-        if (h > 0) for (const x of list) run("INSERT INTO task_splits(task_id,date,model_id,hours,text) VALUES(?,?,?,?,?)", t.id, date, x.m, x.h, x.txt);
-        if (!("text" in body)) {   // 칸의 '한 일' = 모델별 한 일을 이어 붙임 (다른 화면 · 주황 ✎ 그대로 쓰도록)
+        const sum = list!.reduce((a: number, x: any) => a + x.h, 0);
+        if (h > 0 && list!.length && Math.abs(sum - h) > 1e-9) err(400, `모델별 시간 합계(${sum}h)가 칸 시간(${h}h)과 다릅니다`);
+        if ("text" in body) body.text = str(body.text, 1000);
+        else {   // 칸의 '한 일' = 모델별 한 일을 이어 붙임. 모두 비었으면 이미 있던 한 일은 그대로 둠 (사람이 직접 지울 때만 지움)
           const c2 = ctx();
-          body.text = list.filter((x: any) => x.txt).map((x: any) => `[${x.m ? (c2.models.get(x.m)?.name || "") : "공통"} ${x.h}h] ${x.txt}`).join(" / ");
+          const joined = list!.filter((x: any) => x.txt).map((x: any) => `[${x.m ? (c2.models.get(x.m)?.name || "") : "공통"} ${x.h}h] ${x.txt}`).join(" / ");
+          if (joined) body.text = joined;
         }
-        audit(me.id, "모델별 나누기", `task ${t.id} ${date}`, list.map((x: any) => `${x.m || "공통"} ${x.h}h`).join(", "));
-      } else if (old !== h) run("DELETE FROM task_splits WHERE task_id=? AND date=?", t.id, date);
-      if ("text" in body) {   // 그날 한 일 (통상 · 기타 업무)
-        const txt = str(body.text, 1000); const was = q1("SELECT text FROM task_notes WHERE task_id=? AND date=?", t.id, date)?.text || "";
-        if (!txt) run("DELETE FROM task_notes WHERE task_id=? AND date=?", t.id, date);
-        else run("INSERT INTO task_notes(task_id,date,text) VALUES(?,?,?) ON CONFLICT(task_id,date) DO UPDATE SET text=excluded.text, updated=datetime('now','localtime')", t.id, date, txt);
-        if (was !== txt) audit(me.id, "업무 기록", `task ${t.id} ${date}`, { from: was, to: txt });
       }
-      return json({ ok: true });
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        if (h === 0) run("DELETE FROM task_hours WHERE task_id=? AND date=?", t.id, date);
+        else run("INSERT INTO task_hours(task_id,date,hours) VALUES(?,?,?) ON CONFLICT(task_id,date) DO UPDATE SET hours=excluded.hours", t.id, date, h);
+        if (list) {
+          run("DELETE FROM task_splits WHERE task_id=? AND date=?", t.id, date);
+          if (h > 0) for (const x of list) run("INSERT INTO task_splits(task_id,date,model_id,hours,text) VALUES(?,?,?,?,?)", t.id, date, x.m, x.h, x.txt);
+          audit(me.id, "모델별 나누기", `task ${t.id} ${date}`, list.map((x: any) => `${x.m || "공통"} ${x.h}h`).join(", "));
+        } else if (old !== h) unsplit(t.id, date, me.id);   // 시간만 바뀜 → 나누기 풀고 한 일의 [모델 Xh] 표시만 뗌 (글은 남김)
+        if ("text" in body) {   // 그날 한 일 (통상 · 기타 업무)
+          const txt = str(body.text, 1000); const was = q1("SELECT text FROM task_notes WHERE task_id=? AND date=?", t.id, date)?.text || "";
+          if (!txt) run("DELETE FROM task_notes WHERE task_id=? AND date=?", t.id, date);
+          else run("INSERT INTO task_notes(task_id,date,text) VALUES(?,?,?) ON CONFLICT(task_id,date) DO UPDATE SET text=excluded.text, updated=datetime('now','localtime')", t.id, date, txt);
+          if (was !== txt) audit(me.id, "업무 기록", `task ${t.id} ${date}`, { from: was, to: txt });
+        }
+        db.exec("COMMIT");
+      } catch (e) { try { db.exec("ROLLBACK"); } catch {} throw e; }
+      return json({ ok: true, text: q1("SELECT text FROM task_notes WHERE task_id=? AND date=?", t.id, date)?.text || "" });
     }
     if (body.type === "issue") {
       const iss = q1("SELECT * FROM issues WHERE id=?", Number(body.id)); if (!iss) err(404, "없는 이슈입니다");

@@ -1,0 +1,86 @@
+# 0.8.1 화면 확인 (화면 오류 재현)   사용: python3 ui081.py <주소> <비밀번호> <출력> <팀원>
+import sys, asyncio
+from playwright.async_api import async_playwright
+BASE, PW, OUT, MEM = sys.argv[1:5]
+errs = []; res = []
+def chk(n, c, i=""): res.append((n, bool(c))); print(("  ✓ " if c else "  ✗ ") + n, i if not c else "")
+async def main():
+    async with async_playwright() as p:
+        b = await p.chromium.launch()
+        ctx = await b.new_context(viewport={"width": 1500, "height": 950}, device_scale_factor=1.25)
+        pg = await ctx.new_page(); pg.on("pageerror", lambda e: errs.append(str(e)))
+        await pg.goto(BASE); await pg.fill("input[autocomplete=username]", MEM); await pg.fill("input[type=password]", PW); await pg.click("button.pri"); await pg.wait_for_selector("nav a"); await pg.wait_for_timeout(900)
+        while await pg.locator(".modal.pop").count(): await pg.locator(".modal.pop .ft button.pri").click(); await pg.wait_for_timeout(300)
+        await pg.goto(f"{BASE}/#/me"); await pg.wait_for_selector(".week tbody tr[data-id]"); await pg.wait_for_timeout(500)
+        toasts = []
+        await pg.expose_function("rec", lambda t: toasts.append(t))
+        await pg.evaluate("new MutationObserver(ms=>{for(const m of ms) for(const n of m.addedNodes) if(n.nodeType===1) rec(n.textContent)}).observe(document.querySelector('#toast'),{childList:true})")
+        row = pg.locator(".week tbody tr[data-id]", has_text="외근").first
+        c = row.locator("input.h:not([disabled])").nth(0)
+        # 1) 화면 그대로: 5 넣기 → 창 → 10 + 1 로 고치고 Enter (합계 틀림)
+        await c.click(); await c.fill("5"); await pg.keyboard.press("Tab"); await pg.wait_for_selector(".modal.split-pop"); await pg.wait_for_timeout(300)
+        bb = await pg.locator(".modal.split-pop").bounding_box()
+        cx, cy = bb["x"] + bb["width"] / 2, bb["y"] + bb["height"] / 2
+        chk("창이 화면 가운데", abs(cx - 750) < 40 and abs(cy - 475) < 120, (cx, cy))
+        await pg.screenshot(path=f"{OUT}/V081_1_가운데창.png")
+        r0 = pg.locator(".split-pop .spl-rows .spl-row").nth(0)
+        await r0.locator(".spl-h").fill("10")
+        await pg.locator(".split-pop button", has_text="모델 추가").click(); await pg.wait_for_timeout(200)
+        r1 = pg.locator(".split-pop .spl-rows .spl-row").nth(1)
+        chk("추가한 줄은 '모델 고르기'", "모델 고르기" in (await r1.locator(".ssel-in").get_attribute("placeholder") or "") or (await r1.locator(".ssel-in").input_value()) in ("", "모델 고르기"), await r1.locator(".ssel-in").input_value())
+        await r1.locator(".spl-h").fill("1"); await r1.locator(".spl-h").press("Enter"); await pg.wait_for_timeout(500)
+        chk("합계 틀림 → 창 남음", await pg.locator(".modal.split-pop").count() == 1)
+        n_before = len(toasts)
+        # 2) 창 밖(배경)을 여러 번 눌러도 같은 알림이 계속 뜨지 않음 → 물어보는 창만
+        await pg.mouse.click(30, 900); await pg.wait_for_timeout(400)
+        chk("배경 누름 → '저장하지 않고 닫을까요?'", await pg.locator(".modal", has_text="저장하지 않고 닫을까요").count() == 1)
+        await pg.locator(".modal", has_text="저장하지 않고 닫을까요").locator(".ft button", has_text="닫기").click(); await pg.wait_for_timeout(300)
+        chk("확인에서 닫기 → 나누기 창 그대로", await pg.locator(".modal.split-pop").count() == 1)
+        # 3) 창에서 투입 시간 11 로 → Enter → 모델 고르라는 알림 → 고르고 저장
+        await pg.locator(".split-pop .spl-tot").fill("11"); await pg.locator(".split-pop .spl-tot").press("Enter"); await pg.wait_for_timeout(400)
+        chk("모델 안 고른 줄 → 알림", any("모델을 골라" in t for t in toasts[n_before:]), toasts[n_before:])
+        await r1.locator(".ssel-in").click(); await pg.keyboard.type("G10", delay=50); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(200)
+        await r0.locator(".spl-t").fill("서천 대응"); await r1.locator(".spl-t").fill("샘플 확인")
+        await pg.screenshot(path=f"{OUT}/V081_2_시간바꿔저장.png")
+        await r1.locator(".spl-t").press("Enter"); await pg.wait_for_timeout(700)
+        chk("저장 → 창 닫힘", await pg.locator(".modal.split-pop").count() == 0)
+        chk("칸 값 11", await c.input_value() == "11", await c.input_value())
+        # 4) 아무 데나 여러 번 눌러도 오류 알림 없음 (유령 창 없음)
+        k = len(toasts)
+        for xy in ((200, 120), (900, 700), (600, 300)): await pg.mouse.click(*xy); await pg.wait_for_timeout(250)
+        chk("여기저기 눌러도 오류 알림 없음", not any("맞춰" in t for t in toasts[k:]), toasts[k:])
+        # 5) 칸을 6 으로 → 창이 다시 뜨고 모델 · 한 일 이어받음, 시간은 다시 나눔
+        await c.click(); await c.fill("6"); await pg.keyboard.press("Tab"); await pg.wait_for_selector(".modal.split-pop"); await pg.wait_for_timeout(300)
+        ts = await pg.locator(".split-pop .spl-t").evaluate_all("e=>e.map(x=>x.value)")
+        hs = await pg.locator(".split-pop .spl-h").evaluate_all("e=>e.map(x=>x.value)")
+        chk("모델 · 한 일 이어받음", sorted(ts) == ["샘플 확인", "서천 대응"], ts)
+        chk("시간은 6 기준으로 다시 나눔", sum(float(x or 0) for x in hs) == 6, hs)
+        await pg.screenshot(path=f"{OUT}/V081_3_시간바뀜_이어받음.png")
+        await pg.keyboard.press("Escape"); await pg.wait_for_timeout(400)
+        chk("Esc → 닫힘", await pg.locator(".modal.split-pop").count() == 0)
+        # 6) ✎ 를 눌러도 같은 창 (투입 시간 6)
+        await row.locator("button.note-btn").nth(0).click(); await pg.wait_for_selector(".modal.split-pop"); await pg.wait_for_timeout(200)
+        chk("✎ → 나누기 창 · 투입 6", await pg.locator(".split-pop .spl-tot").input_value() == "6")
+        ts2 = await pg.locator(".split-pop .spl-t").evaluate_all("e=>e.map(x=>x.value)")
+        chk("✎ 창에 한 일 ([모델] 남긴 글에서 다시 가져옴)", sorted(ts2) == ["샘플 확인", "서천 대응"], ts2)
+        await pg.screenshot(path=f"{OUT}/V081_4_연필창.png")
+        await pg.keyboard.press("Enter"); await pg.wait_for_timeout(700)
+        chk("✎ 창 Enter 저장", await pg.locator(".modal.split-pop").count() == 0)
+        # 7) 시간이 없는 날 ✎ → 창에서 시간부터 넣기
+        c3 = row.locator("input.h:not([disabled])").nth(1)
+        await row.locator("button.note-btn").nth(1).click(); await pg.wait_for_selector(".modal.split-pop")
+        await pg.locator(".split-pop .spl-tot").fill("3"); await pg.wait_for_timeout(100)
+        chk("총 시간 넣으면 첫 줄에 그대로", await pg.locator(".split-pop .spl-h").first.input_value() == "3")
+        await pg.locator(".split-pop .spl-tot").press("Enter"); await pg.wait_for_timeout(700)
+        chk("빈 날 ✎ 에서 저장 → 칸 3", await c3.input_value() == "3", await c3.input_value())
+        # 8) 일반 업무 ✎ 는 예전 창 그대로
+        nrow = pg.locator(".week tbody tr[data-id]", has_text="회의").first
+        await nrow.locator("button.note-btn").nth(0).click(); await pg.wait_for_timeout(400)
+        chk("일반 행 ✎ → 한 일 창 (나누기 아님)", await pg.locator(".modal.split-pop").count() == 0 and await pg.locator(".modal textarea").count() >= 1)
+        await pg.keyboard.press("Escape"); await pg.wait_for_timeout(300)
+        chk("'모델을 골라' 알림은 누른 횟수만큼 (2번)", sum("모델을 골라" in t for t in toasts) == 2, toasts)
+        print("알림 기록:", toasts)
+        chk("화면 오류 없음", not errs, errs)
+        await b.close()
+asyncio.run(main())
+print(f"0.8.1 화면: 통과 {sum(1 for _, x in res if x)} · 실패 {sum(1 for _, x in res if not x)}")

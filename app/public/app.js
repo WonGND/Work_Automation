@@ -116,7 +116,7 @@ function modal(title, body, buttons, opts = {}) {
     });
     hd.addEventListener("dblclick", e => { if (e.target.closest("input,button,select")) return; box.style.width = ""; box.style.height = ""; try { localStorage.removeItem(key); } catch {} });
   }
-  bg.addEventListener("mousedown", e => { if (e.target === bg && !opts.noBgClose) close(); });
+  bg.addEventListener("mousedown", e => { if (e.target === bg && !opts.noBgClose) (opts.bgEsc && bg._esc ? bg._esc() : close()); });   // 0.8.1: bgEsc = 바깥을 눌러도 쓴 게 있으면 물어봄
   document.body.append(bg);
   return close;
 }
@@ -688,6 +688,13 @@ async function renderWeek(box, uid, readonly, refreshAll) {
     const inp = h("input", { class: "h", inputmode: "decimal", value: r.hours[d.date] ? String(r.hours[d.date]) : "", disabled: dis, title: d.date, "data-r": ri, "data-c": ci, autocomplete: "off" });
     (allInputs[ri] = allInputs[ri] || [])[ci] = inp;
     let last = inp.value;
+    // 0.8.1: 칸 값 · 합계 · ✎ 표시를 한 번에 맞춤 (칸에서 넣을 때 · 나누기 창에서 저장할 때 같이 씀)
+    const setH = (n, txt) => {
+      inp.value = n ? String(n) : ""; last = inp.value;
+      if (n) r.hours[d.date] = n; else delete r.hours[d.date];
+      if (txt !== undefined) { r.texts ||= {}; if (txt) r.texts[d.date] = txt; else delete r.texts[d.date]; }
+      recalc(); rowTot(); box.dispatchEvent(new Event("hours-saved")); markNote();
+    };
     inp.addEventListener("focus", () => inp.select());
     inp.addEventListener("keydown", e => {
       const atStart = inp.selectionStart === 0 && inp.selectionEnd === 0, atEnd = inp.selectionStart === inp.value.length, all = inp.selectionStart === 0 && inp.selectionEnd === inp.value.length;
@@ -704,16 +711,15 @@ async function renderWeek(box, uid, readonly, refreshAll) {
         inp.classList.add("bad"); toast(`시간은 0 ~ 24 사이, ${w.unit}시간 단위로 넣습니다 (30분 = 0.5)`, true); inp.value = last; setTimeout(() => inp.classList.remove("bad"), 1500); return;
       }
       try {
-        await api("PUT", "/api/hours", { type: r.type, id: r.id, date: d.date, hours: n });
-        last = inp.value; if (n) r.hours[d.date] = n; else delete r.hours[d.date];
-        inp.classList.remove("saved"); void inp.offsetWidth; inp.classList.add("saved"); recalc(); rowTot(); box.dispatchEvent(new Event("hours-saved"));
-        markNote();
+        const res = await api("PUT", "/api/hours", { type: r.type, id: r.id, date: d.date, hours: n });
+        const old = r.split ? r.splits?.[d.date] : null;
+        if (old && old.reduce((a, x) => a + x.hours, 0) !== n) delete r.splits[d.date];   // 0.8.1: 서버가 나누기를 풀고 한 일은 [모델] 표시로 남김
+        setH(n, r.type === "task" && res && "text" in res ? res.text : undefined);
+        inp.classList.remove("saved"); void inp.offsetWidth; inp.classList.add("saved");
         // 0.7.5: 시간을 넣고 칸을 나가면 바로 "한 일 한 줄" (이미 적었거나 0이면 안 띄움 · 내 정보에서 끌 수 있음)
         if (r.split) {   // 0.8.0: 다중 모델 · 외근 — 모델별 시간 · 한 일 나누기 (외근은 늘 · 다중 모델은 '한 일 한 줄' 설정을 따름)
-          const old = r.splits?.[d.date];
-          if (old && old.reduce((a, x) => a + x.hours, 0) !== n) { delete r.splits[d.date]; }
-          if (n && (r.fixedKey === "5" || getPref("noteInline", true))) splitInline(inp, r, d.date, n, w.unit, markNote);
-          else if (!n && r.splits) delete r.splits[d.date];
+          // 0.8.1: 화면 가운데 창으로 (시간도 그 창에서 고칠 수 있음 · 예전 나누기의 모델 · 한 일은 이어받음)
+          if (n && (r.fixedKey === "5" || getPref("noteInline", true))) splitModal(r, d.date, n, w.unit, { seed: old, setH, back: inp });
         }
         else if (n && nb && !r.texts?.[d.date] && getPref("noteInline", true)) noteInline(inp, r, d.date, n, txt => { (r.texts = r.texts || {})[d.date] = txt; markNote(); });
       } catch (e) { toast(e.message, true); inp.value = last; }
@@ -725,7 +731,7 @@ async function renderWeek(box, uid, readonly, refreshAll) {
     const markNote = () => { if (!nb) return; const has = !!r.texts?.[d.date]; nb.classList.toggle("has", has); nb.classList.toggle("miss", !has && !!r.hours[d.date]); nb.title = has ? r.texts[d.date] : r.hours[d.date] ? "한 일을 아직 안 적었습니다 · 눌러서 쓰기" : "그날 한 일 쓰기"; nb.disabled = dis && !has; };
     if (r.type === "issue" || (r.kind !== "휴가" && r.kind !== "조퇴")) {
       nb = h("button", { class: "note-btn", tabindex: -1 }, "✎");
-      nb.addEventListener("click", () => (r.split && !(readonly || dis) && r.hours[d.date]) ? splitInline(inp, r, d.date, r.hours[d.date], w.unit, markNote) : logModal(r, d.date, readonly || dis, again));
+      nb.addEventListener("click", () => (r.split && !(readonly || dis)) ? splitModal(r, d.date, r.hours[d.date] || 0, w.unit, { setH, back: inp }) : logModal(r, d.date, readonly || dis, again));   // 0.8.1: ✎ 도 시간 · 모델별 나누기 창
       wrap.append(nb); markNote();
     }
     return { td: h("td", { class: "c " + (d.workday ? "" : "we ") + (d.today ? "today" : "") }, wrap), setTot: f => (rowTot = f) };
@@ -774,78 +780,111 @@ async function renderWeek(box, uid, readonly, refreshAll) {
 }
 
 // 0.7.5: 시간 칸 아래 "한 일 한 줄" — Enter 저장 · Esc 건너뛰기 (둘 다 원래 가려던 칸으로) · 칸 밖을 누르면 적은 것이 있을 때만 저장
-// 0.8.0: 모델별 나누기 칸 — 다중 모델 업무는 그 업무의 모델들, 외근은 모델을 골라 추가. 합계 = 칸 시간이어야 저장
-//   Enter = 저장 · Esc = 건너뛰기 (다중 모델은 똑같이 나눔, 외근은 공통)
+// 0.8.0: 모델별 나누기 — 다중 모델 업무는 그 업무의 모델들, 외근은 모델을 골라 추가. 합계 = 칸 시간이어야 저장
+// 0.8.1: 나누기는 화면 가운데 창 (splitModal). 창은 늘 하나 · 창에서 시간도 고침 · 저장이 안 되면 창에 그대로 남고 알림은 한 번
+//   · 칸 시간이 바뀌어 나누기가 풀려도 예전 모델 · 한 일을 이어받음 · 한 일만 적어 둔 날은 그 글을 첫 줄로 가져옴 (지우는 건 사람이 직접)
 function evenSplit(total, n, unit) {
   const k = Math.round(total / unit), base = Math.floor(k / n), rest = k - base * n;
   return Array.from({ length: n }, (_, i) => (base + (i < rest ? 1 : 0)) * unit);
 }
-function splitInline(inp, r, date, hours, unit, after) {
-  document.querySelectorAll(".note-inl").forEach(e => e.remove());
-  const next = document.activeElement !== inp && document.activeElement?.matches?.(".week input.h") ? document.activeElement : null;
+// "[G10 2h] 글 / [공통] 글" → [{name, text}] (모양이 아니면 null)
+function parseSplitNote(t) {
+  const parts = String(t || "").split(" / ");
+  const out = parts.map(p => { const m = p.match(/^\[([^\[\]]{1,40}?)(?: [0-9.]+h)?\] ?([\s\S]*)$/); return m ? { name: m[1], text: m[2].trim() } : null; });
+  return out.length && out.every(Boolean) ? out : null;
+}
+let SPLIT_CLOSE = null, NOTE_FIN = null;
+function splitModal(r, date, hours, unit, o = {}) {
+  NOTE_FIN?.(); SPLIT_CLOSE?.();
+  const next = document.activeElement !== o.back && document.activeElement?.matches?.(".week input.h") ? document.activeElement : null;
   const out = r.fixedKey === "5";
-  const opts = [["0", "공통 (모델 없음)"], ...modelsFor("").map(m => [m.id, `${m.name} (${m.part})`])];
-  const old = r.splits?.[date];
-  let seed = old?.length ? old.map(x => ({ m: x.model_id, h: x.hours, t: x.text }))
-    : out ? [{ m: 0, h: hours, t: "" }] : r.modelIds.map(m => ({ m, h: 0, t: "" }));
-  if (!old?.length || seed.reduce((a, x) => a + x.h, 0) !== hours) evenSplit(hours, seed.length, unit).forEach((v, i) => (seed[i].h = v));
+  const opts = [["", "모델 고르기"], ["0", "공통 (모델 없음)"], ...modelsFor("").map(m => [m.id, `${m.name} (${m.part})`])];
+  const idOf = name => name === "공통" ? 0 : (M.models.find(m => m.name === name)?.id ?? "");
+  const nameOf = id => id === 0 || id === "0" ? "공통" : modelName(Number(id)) || "";
+  // 처음 줄: 지금 나누기 → 방금 풀린 나누기 → 한 일 글 (모양이 [모델] 글 이면 모델별로)
+  const cur = r.splits?.[date]?.length ? r.splits[date] : o.seed?.length ? o.seed : null;
+  const note = r.texts?.[date] || "";
+  const src = cur ? cur.map(x => ({ m: x.model_id, h: x.hours, t: x.text || "" })) : (parseSplitNote(note) || []).map(p => ({ m: idOf(p.name), h: 0, t: p.text }));
+  let seed;
+  if (out) seed = src.length ? src : [{ m: 0, h: 0, t: note }];
+  else {
+    seed = r.modelIds.map(m => ({ m, h: 0, t: "" }));
+    const extra = [];
+    for (const x of src) { const k = seed.find(y => y.m === x.m); if (k) { k.h = x.h; k.t = x.t; } else if (x.t) extra.push(x.t); }
+    if (!cur && !src.length && note) extra.push(note);
+    if (extra.length && seed[0]) seed[0].t = [seed[0].t, ...extra].filter(Boolean).join(" / ");
+  }
+  const hrsIn = h("input", { class: "inp spl-tot", inputmode: "decimal", value: hours ? String(hours) : "" });
   const list = h("div", { class: "spl-rows" });
   const sumEl = h("span", {});
   const rows = [];
-  const upd = () => { const s = rows.reduce((a, x) => a + (Number(x.hh.value) || 0), 0); sumEl.textContent = `합계 ${fmtH(s)}h / 칸 ${fmtH(hours)}h`; sumEl.className = Math.abs(s - hours) < 1e-9 ? "ok" : "bad"; return s; };
+  let touched = false;   // 사람이 모델별 시간을 고쳤는지 (안 고쳤으면 총 시간이 바뀔 때 다시 똑같이 나눔)
+  const total = () => { const v = hrsIn.value.trim(); return v === "" ? 0 : Number(v); };
+  const reEven = () => { const t = total(); if (!(t > 0) || !rows.length) return; evenSplit(t, rows.length, unit).forEach((v, i) => (rows[i].hh.value = v ? String(v) : "")); };
+  const upd = () => { const s = rows.reduce((a, x) => a + (Number(x.hh.value) || 0), 0), t = total(); sumEl.textContent = `합계 ${fmtH(s)}h / 투입 ${fmtH(t)}h`; sumEl.className = Math.abs(s - t) < 1e-9 ? "ok" : "bad"; return s; };
   const addRow = (x, focus) => {
-    const mEl = out ? searchSel(opts, String(x.m ?? 0)) : h("span", { class: "spl-m" }, modelName(x.m) || "?");
+    const mEl = out ? searchSel(opts, x.m === "" || x.m == null ? "" : String(x.m)) : h("span", { class: "spl-m" }, nameOf(x.m) || "?");
     const hh = h("input", { class: "inp spl-h", inputmode: "decimal", value: x.h ? String(x.h) : "" });
     const tt = h("input", { class: "inp spl-t", maxlength: 500, value: x.t || "", placeholder: "한 일 (선택)" });
-    const o = { mEl, hh, tt, m: x.m };
-    const del = out && rows.length ? h("button", { type: "button", class: "btn sm", title: "이 줄 지우기", onclick: () => { rows.splice(rows.indexOf(o), 1); row.remove(); upd(); } }, "✕") : h("span");
+    const ro = { mEl, hh, tt, m: x.m };
+    const del = out ? h("button", { type: "button", class: "btn sm", title: "이 줄 지우기", onclick: () => { if (rows.length < 2) return toast("한 줄은 남아야 합니다", true); rows.splice(rows.indexOf(ro), 1); row.remove(); if (!touched) reEven(); upd(); } }, "✕") : h("span");
     const row = h("div", { class: "spl-row" }, mEl, hh, tt, del);
-    hh.addEventListener("input", upd);
-    rows.push(o); list.append(row); upd();
-    if (focus) (out ? mEl.querySelector("input") : hh)?.focus();
+    hh.addEventListener("input", () => { touched = true; upd(); });
+    rows.push(ro); list.append(row);
+    if (focus) setTimeout(() => (mEl.querySelector?.("input") || hh).focus(), 0);
   };
   seed.forEach(x => addRow(x));
-  const addBtn = out ? h("button", { type: "button", class: "link2", onclick: () => { const s = upd(); addRow({ m: 0, h: Math.max(0, hours - s), t: "" }, true); } }, "+ 모델 추가") : "";
-  const box = h("div", { class: "note-inl spl-inl" },
-    h("div", { class: "spl-hd" }, h("b", {}, `${r.title} · ${dd(date)} · ${fmtH(hours)}h`), h("span", { class: "muted small" }, out ? "모델을 고르고 모델별 시간 · 한 일" : "모델별 시간 · 한 일 (기본: 똑같이 나눔)")),
+  if (hours > 0 && Math.abs(seed.reduce((a, x) => a + (x.h || 0), 0) - hours) < 1e-9) touched = true; else reEven();
+  upd();
+  hrsIn.addEventListener("input", () => { if (!touched) reEven(); upd(); });
+  const addBtn = out ? h("button", { type: "button", class: "link2", onclick: () => { const s = upd(); addRow({ m: "", h: Math.max(0, total() - s), t: "" }, true); upd(); } }, "+ 모델 추가") : "";
+  const body = h("div", { class: "spl-box" },
+    h("div", { class: "row spl-top" }, h("label", {}, "투입 시간(h)"), hrsIn, h("span", { class: "muted small" }, out ? "모델을 고르고 모델별 시간 · 한 일을 적습니다" : `모델별 시간 · 한 일 (기본: 똑같이 나눔 · ${(r.models || []).join(" · ")})`)),
     h("div", { class: "spl-row spl-lh" }, h("span", {}, "모델"), h("span", {}, "시간"), h("span", {}, "한 일"), h("span")), list,
-    h("div", { class: "spl-ft" }, addBtn, sumEl, h("span", { class: "muted small" }, "Enter = 저장 · Esc = 건너뛰기")));
-  const rc = inp.getBoundingClientRect();
-  box.style.left = Math.max(8, Math.min(innerWidth - 560, rc.left + scrollX - 40)) + "px"; box.style.top = (rc.bottom + scrollY + 4) + "px";
-  document.body.append(box);
-  let fin = false;
-  const end = async save => {
-    if (fin) return;
-    if (save) {
-      const sp = rows.map(o => ({ model_id: out ? Number(o.mEl.value) || 0 : o.m, hours: Number(o.hh.value) || 0, text: o.tt.value.trim() })).filter(x => x.hours > 0);
-      const s = sp.reduce((a, x) => a + x.hours, 0);
-      if (Math.abs(s - hours) > 1e-9) { toast(`모델별 시간 합계(${fmtH(s)}h)를 칸 시간(${fmtH(hours)}h)과 맞춰 주세요`, true); return; }
-      if (new Set(sp.map(x => x.model_id)).size !== sp.length) { toast("같은 모델이 두 줄 있습니다", true); return; }
-      fin = true;
-      try {
-        await api("PUT", "/api/hours", { type: "task", id: r.id, date, hours, splits: sp });
-        (r.splits ||= {})[date] = sp.map(x => ({ ...x, model: x.model_id ? modelName(x.model_id) : "공통" }));
-        const txt = sp.filter(x => x.text).map(x => `[${x.model_id ? modelName(x.model_id) : "공통"} ${fmtH(x.hours)}h] ${x.text}`).join(" / ");
-        r.texts ||= {}; if (txt) r.texts[date] = txt; else delete r.texts[date];
-        toast("모델별로 나눠 저장했습니다");
-      } catch (e) { toast(e.message, true); fin = false; return; }
-    } else fin = true;
-    box.remove(); after?.(); (next || inp).focus();
+    h("div", { class: "spl-ft" }, addBtn, sumEl, h("span", { class: "muted small" }, "Enter = 저장 · Esc = 닫기")));
+  let busy = false;
+  const save = async () => {
+    if (busy) return false;
+    const H = total();
+    if (!isFinite(H) || H < 0 || H > 24 || Math.abs(H / unit - Math.round(H / unit)) > 1e-9) { toast(`시간은 0 ~ 24 사이, ${unit}시간 단위로 넣습니다`, true); hrsIn.focus(); return false; }
+    const sp = [];
+    for (const ro of rows) {
+      const hv = ro.hh.value.trim(), hn = hv === "" ? 0 : Number(hv), txt = ro.tt.value.trim();
+      if (!isFinite(hn) || hn < 0 || Math.abs(hn / unit - Math.round(hn / unit)) > 1e-9) { toast(`모델별 시간도 ${unit}시간 단위로 넣습니다`, true); ro.hh.focus(); return false; }
+      const mv = out ? ro.mEl.value : String(ro.m);
+      if (hn > 0 && mv === "") { toast("모델을 골라 주세요 (모델이 없으면 '공통')", true); ro.mEl.querySelector?.("input")?.focus(); return false; }
+      if (!hn && txt && H > 0) { toast("시간이 비어 있는 줄에 한 일이 있습니다. 시간을 넣거나 한 일을 다른 줄로 옮겨 주세요", true); ro.hh.focus(); return false; }
+      if (hn > 0) sp.push({ model_id: Number(mv) || 0, hours: hn, text: txt });
+    }
+    const s = sp.reduce((a, x) => a + x.hours, 0);
+    if (H > 0 && Math.abs(s - H) > 1e-9) { toast(`모델별 시간 합계(${fmtH(s)}h)를 투입 시간(${fmtH(H)}h)과 맞춰 주세요`, true); return false; }
+    if (new Set(sp.map(x => x.model_id)).size !== sp.length) { toast("같은 모델이 두 줄 있습니다. 한 줄로 합쳐 주세요", true); return false; }
+    const text = sp.filter(x => x.text).map(x => `[${nameOf(x.model_id)} ${fmtH(x.hours)}h] ${x.text}`).join(" / ");
+    busy = true;
+    try {
+      const res = H > 0 ? await api("PUT", "/api/hours", { type: "task", id: r.id, date, hours: H, splits: sp, text })
+        : await api("PUT", "/api/hours", { type: "task", id: r.id, date, hours: 0 });
+      r.splits ||= {};
+      if (H > 0) r.splits[date] = sp.map(x => ({ ...x, model: nameOf(x.model_id) })); else delete r.splits[date];
+      o.setH?.(H, res?.text ?? text);
+      toast(H > 0 ? "모델별로 나눠 저장했습니다" : "시간을 지웠습니다");
+    } catch (e) { toast(e.message, true); return false; }
+    finally { busy = false; }
   };
-  box.addEventListener("keydown", e => {
-    if (e.isComposing || e.target.closest?.(".ssel-list")) return;
-    if (e.key === "Enter" && !e.target.matches?.(".ssel-in")) { e.preventDefault(); end(true); }
-    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(false); }
+  const close = modal(`${r.title} · ${dd(date)}`, body, [{ text: "저장", cls: "pri", fn: save }],
+    { key: "split", cls: "split-pop", bgEsc: true, onClose: () => { if (SPLIT_CLOSE === close) SPLIT_CLOSE = null; setTimeout(() => (next || o.back)?.focus?.(), 0); } });
+  SPLIT_CLOSE = close;
+  body.addEventListener("keydown", async e => {
+    if (e.key !== "Enter" || e.isComposing || e.target.closest?.(".ssel-list")) return;
+    if (e.target.matches?.(".ssel-in")) return;   // 모델 고르기 칸의 Enter 는 고르기만 (저장 아님)
+    if (e.target.tagName === "BUTTON") return;
+    e.preventDefault(); if ((await save()) !== false) close();
   });
-  // 칸 밖을 누르면: 고친 게 있으면 저장 시도(합계가 안 맞으면 남김), 없으면 닫기
-  const snap = () => rows.map(o => `${out ? o.mEl.value : o.m}:${o.hh.value}:${o.tt.value}`).join("|");
-  const first = snap();
-  const outside = e => { if (fin) return document.removeEventListener("mousedown", outside, true); if (box.contains(e.target) || e.target.closest?.(".ssel-list")) return; end(snap() !== first); };
-  setTimeout(() => document.addEventListener("mousedown", outside, true), 0);
-  setTimeout(() => (rows[0]?.[out ? "mEl" : "hh"]?.querySelector?.("input") || rows[0]?.hh)?.focus(), 30);
+  // 처음 커서: 외근을 새로 적을 때만 모델 고르기, 나머지는 첫 줄 시간 (Esc 한 번에 닫히도록 목록을 바로 펼치지 않음)
+  setTimeout(() => { const f = rows[0]; ((f && (out && !cur && !src.length ? f.mEl.querySelector?.("input") : f.hh)) || hrsIn).focus(); }, 30);
 }
 function noteInline(inp, r, date, hours, done) {
-  document.querySelectorAll(".note-inl").forEach(e => e.remove());
+  NOTE_FIN?.(); document.querySelectorAll(".note-inl").forEach(e => e.remove());   // 0.8.1: 앞 칸에 적던 한 줄은 저장하고 닫음
   const next = document.activeElement !== inp && document.activeElement?.matches?.(".week input.h") ? document.activeElement : null;
   const rc = inp.getBoundingClientRect();
   const ti = h("input", { class: "inp", maxlength: 500, placeholder: `${r.type === "issue" ? r.no + " " : ""}${r.title} — 오늘 한 일 한 줄`, autocomplete: "off" });
@@ -854,11 +893,13 @@ function noteInline(inp, r, date, hours, done) {
   document.body.append(box);
   let fin = false;
   const end = async save => {
-    if (fin) return; fin = true;
+    if (fin) return; fin = true; if (!quiet) NOTE_FIN = null;
     const t = ti.value.trim();
     if (save && t) { try { await api("PUT", "/api/hours", { type: r.type, id: r.id, date, hours, text: t }); done(t); toast("한 일을 저장했습니다"); } catch (e) { toast(e.message, true); } }
-    box.remove(); (next || inp).focus();
+    box.remove(); if (!quiet) (next || inp).focus();
   };
+  let quiet = false;
+  NOTE_FIN = () => { NOTE_FIN = null; quiet = true; end(true); };
   ti.addEventListener("keydown", e => { if (e.isComposing) return; if (e.key === "Enter") { e.preventDefault(); end(true); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(false); } });
   ti.addEventListener("blur", () => setTimeout(() => { if (!fin && document.activeElement !== ti) end(true); }, 150));
   ti.focus();
@@ -1032,7 +1073,15 @@ async function taskModal(t0, readonly, after) {
       }
       if (new Set(b.hours.map(x => x.date)).size !== b.hours.length) throw new Error("같은 날짜가 두 줄 있습니다");
       await api("POST", "/api/tasks", b);
-    } else await api("PUT", `/api/tasks/${t.id}`, b);
+    } else {
+      // 0.8.1: 모델을 바꾸면 빠진 모델로 나눠 둔 날의 나누기가 풀림 → 먼저 알림
+      if (b.models && t.split_dates?.length) {
+        const keep = b.models.map(Number);
+        const n = t.split_dates.filter(x => keep.length < 2 || x.models.some(m => !keep.includes(m))).length;
+        if (n && !(await confirmBox(`모델을 바꾸면 모델별로 나눠 둔 ${n}일의 나누기가 풀립니다.\n그날 시간은 새 모델에 똑같이 나눠 계산되고, 한 일은 [모델] 표시와 함께 그대로 남습니다.\n계속할까요?`))) return false;
+      }
+      await api("PUT", `/api/tasks/${t.id}`, b);
+    }
     toast("저장했습니다"); await after();
   } }];
   if (!readonly && !isNew && !t.fixed) btns.unshift(t.hidden
@@ -1826,7 +1875,7 @@ async function pageAdmin() {
   }
   if (tab === "fold") {   // 0.7.6: 이슈 폴더 (파일 서버)
     let v = await api("GET", "/api/master/share");
-    const unc = h("input", { class: "inp", value: v.unc, placeholder: "예: \\\\서버\\공유폴더\\이슈자료", style: "max-width:560px" });
+    const unc = h("input", { class: "inp", value: v.unc, placeholder: "예: \\\\서버\\공유폴더\\이슈 자료 폴더", style: "max-width:560px" });
     const out = h("div");
     const draw = (res) => {
       out.replaceChildren(

@@ -728,6 +728,13 @@ html[data-dark="1"] .fpath{background:#1f2329;border-color:#3a3f47}
 .mm-chip{display:inline-flex;align-items:center;gap:4px;background:var(--chip,#e7f0fb);color:var(--navy2,#1c4e80);border-radius:12px;padding:2px 4px 2px 10px;font-size:12.5px}
 .mm-chip button{border:0;background:none;cursor:pointer;color:inherit;opacity:.7;font-size:11px;padding:0 4px}
 .spl-inl{width:540px;padding:10px 12px}
+/* 0.8.1: 모델별 나누기 = 화면 가운데 창 */
+.modal.split-pop{width:640px;max-width:calc(100vw - 24px)}
+.modal-bg:has(> .modal.split-pop){align-items:center}
+.spl-top{gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.spl-top label{font-weight:600;font-size:13px}
+.spl-tot{width:80px;text-align:center}
+.split-pop .spl-row{grid-template-columns:170px 64px 1fr 32px}
 .spl-hd{display:flex;flex-direction:column;gap:2px;margin-bottom:6px}
 .spl-row{display:grid;grid-template-columns:150px 58px 1fr 30px;gap:6px;align-items:center;margin-top:4px}
 .spl-row .ssel{min-width:0}

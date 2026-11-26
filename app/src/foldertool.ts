@@ -33,7 +33,10 @@ static class OpenFolder
         if (rel.Length == 0 || rel.Contains("..") || rel.IndexOfAny(":*?\\"<>|".ToCharArray()) >= 0 || rel.StartsWith("\\\\") || rel.Length > 400)
             return Fail("열 수 없는 경로입니다: " + rel);
         string full = Root + "\\\\" + rel;
-        try { Process.Start("explorer.exe", "\\"" + full + "\\""); }
+        // 0.8.1: 폴더만 연다 (파일 경로면 실행될 수 있으므로 거부)
+        if (!System.IO.Directory.Exists(full)) return Fail("폴더를 찾지 못했습니다 (이름이 바뀌었거나 아직 안 만들어졌을 수 있습니다):\\n" + full);
+        // 0.8.1: 탐색기 새 프로세스를 띄우지 않고 윈도우 셸에 폴더를 바로 넘김 (이미 떠 있는 탐색기가 열어서 빠름)
+        try { ProcessStartInfo psi = new ProcessStartInfo(full); psi.UseShellExecute = true; Process.Start(psi); }
         catch (Exception e) { return Fail("폴더를 열 수 없습니다: " + e.Message); }
         return 0;
     }
@@ -56,7 +59,9 @@ function Fail([string]$m) { Add-Type -AssemblyName System.Windows.Forms | Out-Nu
 if ($Link -notmatch '^workfolder:') { Fail '잘못된 링크입니다.' }
 $rel = [uri]::UnescapeDataString($Link.Substring(11)).Trim().Trim('/').Replace('/', '\\')
 if ($rel -eq '' -or $rel -match '\\.\\.' -or $rel -match '[:*?"<>|]' -or $rel.StartsWith('\\') -or $rel.Length -gt 400) { Fail ('열 수 없는 경로입니다: ' + $rel) }
-Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + (Join-Path $Root $rel) + '"')
+$full = Join-Path $Root $rel
+if (-not (Test-Path -LiteralPath $full -PathType Container)) { Fail ('폴더를 찾지 못했습니다: ' + $full) }
+Invoke-Item -LiteralPath $full
 `);
 }
 
@@ -75,29 +80,24 @@ if exist "%DIR%\\open-folder.exe" goto :fast
 copy /Y "%~dp0open-folder.ps1" "%DIR%\\open-folder.ps1" >nul || goto :err
 powershell -NoProfile -Command "Unblock-File -LiteralPath '%DIR%\\open-folder.ps1'" >nul 2>&1
 set "CMD=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \\"%DIR%\\open-folder.ps1\\" \\"%%1\\""
-set "HOW=예비 방식 (조금 느림)"
+set "HOW=ps"
 goto :reg
 :fast
 if exist "%DIR%\\open-folder.ps1" del "%DIR%\\open-folder.ps1" >nul 2>&1
 set "CMD=\\"%DIR%\\open-folder.exe\\" \\"%%1\\""
-set "HOW=빠른 방식"
+set "HOW=fast"
 :reg
 reg add "HKCU\\Software\\Classes\\workfolder" /ve /d "URL:WorkMgmt Folder" /f >nul || goto :err
 reg add "HKCU\\Software\\Classes\\workfolder" /v "URL Protocol" /d "" /f >nul || goto :err
 reg add "HKCU\\Software\\Classes\\workfolder\\shell\\open\\command" /ve /d "%CMD%" /f >nul || goto :err
 echo.
-echo  [설치 완료] 업무관리 '폴더 바로 열기' - %HOW%
-echo.
-echo  1) 크롬 / 엣지를 새로고침합니다.
-echo  2) 업무관리 '내 정보'에서 '이 PC에 설치했습니다'를 체크합니다.
-echo  3) 이슈 번호 옆 폴더 아이콘을 누르고, 처음 한 번 묻는 창에서
-echo     '항상 허용' 체크 후 [열기]를 누릅니다.
+type "%~dp0msg_%HOW%.txt"
 echo.
 pause
 exit /b 0
 :err
 echo.
-echo  [설치 실패] 회사 보안 정책으로 막혔을 수 있습니다. 곽원용 주임 또는 IT에 문의하세요.
+type "%~dp0msg_fail.txt"
 echo.
 pause
 exit /b 1
@@ -107,7 +107,7 @@ chcp 65001 >nul
 reg delete "HKCU\\Software\\Classes\\workfolder" /f >nul 2>&1
 if exist "%LOCALAPPDATA%\\WorkMgmtFolder" rmdir /S /Q "%LOCALAPPDATA%\\WorkMgmtFolder"
 echo.
-echo  [제거 완료] 업무관리 '폴더 바로 열기'를 지웠습니다. '내 정보'의 체크도 꺼 주세요.
+type "%~dp0msg_removed.txt"
 echo.
 pause
 `;
@@ -133,6 +133,18 @@ PC마다 한 번 설치합니다 (내 계정에만 설치 · 관리자 권한 �
 uninstall.cmd 를 더블클릭합니다.
 `;
 
+// 0.8.1: 한글 안내는 cmd 파일 안에 쓰지 않고 txt 를 type 으로 보여 줌 (UTF-8 cmd 의 echo 한글이 잘려 "'크' is not recognized" 가 뜨던 문제)
+const MSG_OK = (how: string) => `  [설치 완료] 업무관리 '폴더 바로 열기' - ${how}
+
+  1) 크롬 / 엣지를 새로고침합니다.
+  2) 업무관리 '내 정보'에서 '이 PC에 설치했습니다'를 체크합니다.
+  3) 이슈 번호 옆 폴더 아이콘을 누르고, 처음 한 번 묻는 창에서
+     '항상 허용' 체크 후 [열기]를 누릅니다.
+`;
+const MSG_FAIL = `  [설치 실패] 회사 보안 정책으로 막혔을 수 있습니다. 홍길동 주임 또는 IT에 문의하세요.
+`;
+const MSG_REMOVED = `  [제거 완료] 업무관리 '폴더 바로 열기'를 지웠습니다. '내 정보'의 체크도 꺼 주세요.
+`;
 export function folderToolZip(unc: string): Uint8Array {
   const u = (s: string, bom = false) => strToU8((bom ? "\uFEFF" : "") + crlf(s));
   return zipSync({
@@ -141,6 +153,10 @@ export function folderToolZip(unc: string): Uint8Array {
     "open-folder.cs": u(handlerCs(unc), true),       // 한글이 들어 있어 BOM 필요 (csc 가 UTF-8 로 읽음)
     "open-folder.ps1": u(handlerPs1(unc), true),     // 예비 (C# 컴파일러가 없는 PC)
     "README.txt": u(README(unc), true),
+    "msg_fast.txt": u(MSG_OK("빠른 방식")),
+    "msg_ps.txt": u(MSG_OK("예비 방식 (조금 느림)")),
+    "msg_fail.txt": u(MSG_FAIL),
+    "msg_removed.txt": u(MSG_REMOVED),
   });
 }
 
@@ -148,8 +164,8 @@ export function folderToolZip(unc: string): Uint8Array {
 export const BUILD_FOR_IT = crlf(`@echo off
 chcp 65001 >nul
 ${CSC}
-if not exist "%CSC%" (echo C# 컴파일러를 찾지 못했습니다 ^(.NET Framework 4^). & pause & exit /b 1)
+if not exist "%CSC%" (echo csc.exe not found - .NET Framework 4 is required. & pause & exit /b 1)
 "%CSC%" /nologo /target:winexe /optimize+ /out:"%~dp0open-folder.exe" /r:System.Windows.Forms.dll "%~dp0open-folder.cs"
-if exist "%~dp0open-folder.exe" (echo open-folder.exe 를 만들었습니다.) else (echo 빌드 실패)
+if exist "%~dp0open-folder.exe" (echo OK: open-folder.exe built.) else (echo FAILED: build error)
 pause
 `);
