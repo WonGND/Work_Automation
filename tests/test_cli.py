@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from pcbsim.cli import EXIT_INVALID, EXIT_NOT_IMPLEMENTED, EXIT_OK, EXIT_USAGE, main
+from pcbsim.cli import EXIT_INVALID, EXIT_OK, EXIT_USAGE, main
 
 EXAMPLE = str(Path(__file__).resolve().parents[1] / "examples" / "soc_4layer.yaml")
 
@@ -44,8 +44,8 @@ def test_check_invalid_config(tmp_path: Path, capsys: pytest.CaptureFixture[str]
     assert "board.stackup" in capsys.readouterr().err
 
 
-def test_report_not_implemented() -> None:
-    assert main(["report", "results"], out=io.StringIO()) == EXIT_NOT_IMPLEMENTED
+def test_report_missing_results_dir(tmp_path: Path) -> None:
+    assert main(["report", str(tmp_path / "nope")], out=io.StringIO()) == EXIT_INVALID
 
 
 def test_solvers_list() -> None:

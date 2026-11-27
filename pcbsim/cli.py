@@ -563,8 +563,36 @@ def cmd_z0(args: argparse.Namespace, out: TextIO) -> int:
 
 
 def cmd_report(args: argparse.Namespace, out: TextIO) -> int:
-    print("pcbsim report: not implemented yet (arrives in stage 7).", file=sys.stderr)
-    return EXIT_NOT_IMPLEMENTED
+    """Render ``<results>/report.html`` from a ``pcbsim run`` output directory."""
+    from pcbsim.post.report import default_report_path, verdict, write_report
+    from pcbsim.post.results_loader import RESULTS_FILE, load_results
+
+    res = load_results(Path(args.results))
+    target = Path(args.out) if args.out else default_report_path(res.directory)
+    if target.suffix.lower() not in (".html", ".htm"):
+        print(f"error: --out must be an .html file, got {target}", file=sys.stderr)
+        return EXIT_USAGE
+    if target.resolve() == (res.directory / RESULTS_FILE).resolve():
+        print("error: --out would overwrite results.json", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        written = write_report(res, target)
+    except OSError as exc:
+        print(f"error: cannot write {target}: {exc.strerror or exc}", file=sys.stderr)
+        return EXIT_INVALID
+    v = verdict(res)
+    board = res.doc.get("board") or "-"
+    print(f"Board  {board}   solvers: {', '.join(res.solvers) or '-'}", file=out)
+    print(
+        f"  {v.violations} violation(s), {v.warnings} warning(s), "
+        f"{len(res.images)} image(s) embedded",
+        file=out,
+    )
+    for note in res.notes:
+        print(f"  [warn] {note}", file=out)
+    print(f"Wrote {written}", file=out)
+    print("PASS" if v.passed else f"FAIL ({v.violations} violation(s))", file=out)
+    return EXIT_OK if v.passed else EXIT_VIOLATIONS
 
 
 def cmd_match(args: argparse.Namespace, out: TextIO) -> int:
@@ -664,8 +692,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     r.set_defaults(func=cmd_run)
 
-    rep = sub.add_parser("report", help="build HTML/JSON reports from a results directory")
-    rep.add_argument("results")
+    rep = sub.add_parser(
+        "report",
+        help="build a self-contained HTML report from a results directory",
+        description=(
+            "Read results.json and the PNG heat maps written by `pcbsim run` (nothing is "
+            "re-simulated or modified) and write one HTML file with every image embedded. "
+            "Exit 0 when no check failed, 4 when the results contain violations, "
+            "1 when results.json is missing or unreadable."
+        ),
+    )
+    rep.add_argument("results", help="directory written by `pcbsim run` (or its results.json)")
+    rep.add_argument("--out", help="HTML file to write (default: <results>/report.html)")
     rep.set_defaults(func=cmd_report)
 
     m = sub.add_parser("match", help="register a mechanical drawing to Gerber/Excellon and check")
