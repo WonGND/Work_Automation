@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import numpy as np
 import yaml
@@ -56,6 +56,9 @@ from pcbsim.model import (
     Via,
 )
 from pcbsim.units import Kind, parse_quantity, to_si
+
+if TYPE_CHECKING:
+    from pcbsim.io.kicad import KicadBoard
 
 
 def _quantity(kind: Kind) -> Any:
@@ -158,8 +161,44 @@ class LayerSpec(_Model):
 
 
 class BoardSpec(_Model):
-    outline: GeomSpec
-    stackup: list[LayerSpec] = Field(min_length=1)
+    """Required without ``kicad:``; with it, each given field overrides the file."""
+
+    outline: GeomSpec | None = None
+    stackup: list[LayerSpec] | None = Field(default=None, min_length=1)
+
+
+class KicadSpec(_Model):
+    """``kicad:`` section — geometry from a ``.kicad_pcb`` file (see :mod:`pcbsim.io.kicad`)."""
+
+    file: str
+    origin: Literal["board", "aux", "file"] = "board"
+    nets: list[str] | None = Field(
+        default=None, description="import copper of these nets only (default: all nets)"
+    )
+    components: Literal["listed", "all"] = Field(
+        default="listed",
+        description="'listed': only footprints named in 'components'; 'all': every footprint",
+    )
+    vias: list[KicadViaSpec] = Field(
+        default_factory=list, description="plating / fill of KiCad vias (KiCad does not store it)"
+    )
+
+
+class KicadViaSpec(_Model):
+    """Applies to every imported via matching ``net`` and/or ``drill`` (±1 µm)."""
+
+    net: str | None = None
+    drill: PositiveLength | None = None
+    plating: PositiveLength | None = None
+    material: str | None = None
+    filled: bool | None = None
+    filler: str | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> KicadViaSpec:
+        if self.filled and self.filler is None:
+            raise ValueError("filled via requires 'filler' material")
+        return self
 
 
 class NetSpec(_Model):
@@ -221,17 +260,11 @@ class ViaSpec(_Model):
 
 class ComponentSpec(_HasGeom):
     ref: str
-    side: Side = Side.TOP
+    side: Side | None = None
     power: Annotated[Power, Field(ge=0.0)] = 0.0
     tj_max: Temperature | None = None
     theta_jc: Annotated[ThermalRes, Field(gt=0.0)] | None = None
     theta_jb: Annotated[ThermalRes, Field(gt=0.0)] | None = None
-
-    @model_validator(mode="after")
-    def _needs_geom(self) -> ComponentSpec:
-        if self.geom() is None:
-            raise ValueError("component needs a footprint geometry (rect/polygon/circle)")
-        return self
 
 
 class ThermalBoundarySpec(_HasGeom):
@@ -373,7 +406,8 @@ class ConfigSpec(_Model):
     units: UnitsSpec = Field(default_factory=UnitsSpec)
     material_files: list[str] = Field(default_factory=list)
     materials: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    board: BoardSpec
+    kicad: KicadSpec | None = None
+    board: BoardSpec = Field(default_factory=BoardSpec)
     nets: list[NetSpec] = Field(default_factory=list)
     shapes: list[ShapeSpec] = Field(default_factory=list)
     vias: list[ViaSpec] = Field(default_factory=list)
@@ -384,6 +418,31 @@ class ConfigSpec(_Model):
     criteria: CriteriaSpec = Field(default_factory=CriteriaSpec)
     analysis: AnalysisSpec = Field(default_factory=AnalysisSpec)
     mechanical: MechanicalSpec | None = None
+
+    @model_validator(mode="after")
+    def _board_source(self) -> ConfigSpec:
+        if self.kicad is None:
+            missing = [k for k in ("outline", "stackup") if getattr(self.board, k) is None]
+            if missing:
+                raise ValueError(f"board needs {' and '.join(missing)} (or give a 'kicad:' file)")
+            for i, c in enumerate(self.components):
+                if c.geom() is None:
+                    raise ValueError(
+                        f"components[{i}] ({c.ref}): needs a footprint geometry "
+                        "(rect/polygon/circle) unless it comes from a 'kicad:' file"
+                    )
+        return self
+
+
+@dataclass(frozen=True, slots=True)
+class KicadInfo:
+    """What a ``kicad:`` import produced, for ``pcbsim check``."""
+
+    path: Path
+    counts: Mapping[str, int]
+    notes: tuple[str, ...]
+    min_width: Mapping[str, float]
+    footprints: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,6 +477,7 @@ class LoadedConfig:
     analysis: AnalysisConfig
     source: Path | None = None
     mechanical: MechanicalLink | None = None
+    kicad: KicadInfo | None = None
 
 
 def format_loc(loc: Sequence[int | str]) -> str:
@@ -440,7 +500,7 @@ def _format_validation_error(exc: ValidationError) -> str:
     return "\n".join(lines)
 
 
-def _check_materials(spec: ConfigSpec, db: MaterialDB) -> list[str]:
+def _check_materials(spec: ConfigSpec, db: MaterialDB, stack: Sequence[Layer]) -> list[str]:
     problems: list[str] = []
 
     def lookup(path: str, name: str) -> None:
@@ -449,8 +509,8 @@ def _check_materials(spec: ConfigSpec, db: MaterialDB) -> list[str]:
         except MaterialError as exc:
             problems.append(f"{path}: {exc}")
 
-    for i, ls in enumerate(spec.board.stackup):
-        path = f"board.stackup[{i}].material"
+    for i, ls in enumerate(stack):
+        path = f"board.stackup[{i}].material" if spec.kicad is None else f"stack-up {ls.name}"
         try:
             m = db[ls.material]
         except MaterialError as exc:
@@ -462,6 +522,11 @@ def _check_materials(spec: ConfigSpec, db: MaterialDB) -> list[str]:
             problems.append(f"{path}: dielectric layer material {m.name!r} has no eps_r")
         if m.k_inplane is None:
             problems.append(f"{path}: material {m.name!r} has no thermal conductivity")
+    for i, kv in enumerate(spec.kicad.vias if spec.kicad is not None else []):
+        if kv.material is not None:
+            lookup(f"kicad.vias[{i}].material", kv.material)
+        if kv.filler is not None:
+            lookup(f"kicad.vias[{i}].filler", kv.filler)
     for i, vs in enumerate(spec.vias):
         lookup(f"vias[{i}].material", vs.material)
         if vs.filler is not None:
@@ -469,31 +534,56 @@ def _check_materials(spec: ConfigSpec, db: MaterialDB) -> list[str]:
     return problems
 
 
-def _build_board(spec: ConfigSpec) -> Board:
-    stackup = Stackup(
-        tuple(
-            Layer(ls.name, ls.kind, ls.thickness, ls.material, ls.role) for ls in spec.board.stackup
-        )
+def _stack_from_spec(spec: ConfigSpec) -> tuple[Layer, ...] | None:
+    if spec.board.stackup is None:
+        return None
+    return tuple(
+        Layer(ls.name, ls.kind, ls.thickness, ls.material, ls.role) for ls in spec.board.stackup
     )
-    outline = spec.board.outline.to_polygon()
+
+
+def _build_board(spec: ConfigSpec, kb: KicadBoard | None = None) -> Board:
+    if kb is None:
+        layers = _stack_from_spec(spec)
+        assert layers is not None
+        assert spec.board.outline is not None
+        stackup = Stackup(layers)
+        outline = spec.board.outline.to_polygon()
+    else:
+        stackup = Stackup(_stack_from_spec(spec) or kb.stackup)
+        outline = spec.board.outline.to_polygon() if spec.board.outline else kb.outline
     conductors = [layer.name for layer in stackup.conductor_layers()]
 
-    nets = tuple(Net(n.name, n.kind, n.voltage) for n in spec.nets)
+    def lay(name: str) -> str:
+        return kb.resolve_layer(name) if kb is not None else name
 
-    shapes = tuple(
+    def net_name(name: str) -> str:
+        return kb.resolve_net(name) if kb is not None else name
+
+    user_nets = {net_name(n.name): n for n in spec.nets}
+    nets_l: list[Net] = []
+    if kb is not None:
+        for n in kb.nets:
+            u = user_nets.get(n.name)
+            nets_l.append(Net(n.name, u.kind, u.voltage) if u is not None else n)
+    known = {n.name for n in nets_l}
+    nets_l += [Net(name, n.kind, n.voltage) for name, n in user_nets.items() if name not in known]
+    nets = tuple(nets_l)
+
+    shapes = tuple(kb.shapes if kb is not None else ()) + tuple(
         Shape(
-            net=s.net,
-            layer=s.layer,
+            net=net_name(s.net),
+            layer=lay(s.layer),
             polygon=outline if s.fill else _geom(s).to_polygon(),
             name=s.name,
         )
         for s in spec.shapes
     )
 
-    vias: list[Via] = []
+    vias: list[Via] = list(kb.vias) if kb is not None else []
     for vs in spec.vias:
-        frm = vs.from_layer or (conductors[0] if conductors else "")
-        to = vs.to_layer or (conductors[-1] if conductors else "")
+        frm = lay(vs.from_layer) if vs.from_layer else (conductors[0] if conductors else "")
+        to = lay(vs.to_layer) if vs.to_layer else (conductors[-1] if conductors else "")
         for x, y in vs.positions():
             vias.append(
                 Via(
@@ -502,7 +592,7 @@ def _build_board(spec: ConfigSpec) -> Board:
                     drill=vs.drill,
                     from_layer=frm,
                     to_layer=to,
-                    net=vs.net,
+                    net=net_name(vs.net),
                     plating_thickness=vs.plating,
                     material=vs.material,
                     filled=vs.filled,
@@ -510,26 +600,52 @@ def _build_board(spec: ConfigSpec) -> Board:
                 )
             )
 
-    components = tuple(
-        Component(
-            ref=c.ref,
-            footprint=_geom(c).to_polygon(),
-            side=c.side,
-            power=c.power,
-            tj_max=c.tj_max,
-            theta_jc=c.theta_jc,
-            theta_jb=c.theta_jb,
+    footprints = kb.footprints if kb is not None else {}
+    comps: list[Component] = []
+    for i, cs in enumerate(spec.components):
+        g = cs.geom()
+        fp = footprints.get(cs.ref)
+        if g is not None:
+            poly = g.to_polygon()
+        elif fp is not None:
+            poly = fp.outline
+        else:
+            raise ConfigError(
+                f"components[{i}] ({cs.ref}): no footprint {cs.ref!r} in the KiCad file "
+                "and no geometry given"
+            )
+        comps.append(
+            Component(
+                ref=cs.ref,
+                footprint=poly,
+                side=cs.side or (fp.side if fp is not None else Side.TOP),
+                power=cs.power,
+                tj_max=cs.tj_max,
+                theta_jc=cs.theta_jc,
+                theta_jb=cs.theta_jb,
+            )
         )
-        for c in spec.components
-    )
+    if kb is not None and spec.kicad is not None and spec.kicad.components == "all":
+        listed = {c.ref for c in comps}
+        comps += [
+            Component(ref=r, footprint=fp.outline, side=fp.side)
+            for r, fp in footprints.items()
+            if r not in listed
+        ]
+    components = tuple(comps)
     by_ref = {c.ref: c for c in components}
+
+    def region_of(ref: str, where: str) -> tuple[Polygon, Side]:
+        if ref in by_ref:
+            return by_ref[ref].footprint, by_ref[ref].side
+        if ref in footprints:
+            return footprints[ref].outline, footprints[ref].side
+        raise ConfigError(f"{where}: unknown component {ref!r}")
 
     ports: list[Port] = []
     for i, p in enumerate(spec.ports):
         if p.component is not None:
-            if p.component not in by_ref:
-                raise ConfigError(f"ports[{i}].component: unknown component {p.component!r}")
-            region = by_ref[p.component].footprint
+            region, _ = region_of(p.component, f"ports[{i}].component")
         else:
             region = _geom(p).to_polygon()
         distribution = (
@@ -539,12 +655,12 @@ def _build_board(spec: ConfigSpec) -> Board:
             Port(
                 p.name,
                 p.kind,
-                p.net,
-                p.layer,
+                net_name(p.net),
+                lay(p.layer),
                 region,
                 p.value,
-                reference_net=p.reference_net,
-                reference_layer=p.reference_layer,
+                reference_net=net_name(p.reference_net) if p.reference_net else None,
+                reference_layer=lay(p.reference_layer) if p.reference_layer else None,
                 distribution=distribution,
             )
         )
@@ -566,8 +682,7 @@ def _build_board(spec: ConfigSpec) -> Board:
                 raise ConfigError(
                     f"thermal_boundaries[{i}].component: unknown component {t.component!r}"
                 )
-            region = by_ref[t.component].footprint
-            side = by_ref[t.component].side
+            region, side = region_of(t.component, f"thermal_boundaries[{i}].component")
         else:
             region = _geom(t).to_polygon()
             side = t.side
@@ -599,11 +714,11 @@ def _build_board(spec: ConfigSpec) -> Board:
         transmission_lines=tuple(
             TransmissionLine(
                 name=t.name,
-                layer=t.layer,
+                layer=lay(t.layer),
                 width=t.width,
                 spacing=t.spacing,
                 target=t.target,
-                references=tuple(t.references),
+                references=tuple(lay(r) for r in t.references),
                 tolerance_pct=t.tolerance_pct,
             )
             for t in spec.transmission_lines
@@ -629,19 +744,25 @@ def load_config_dict(data: Mapping[str, Any], base_dir: Path | None = None) -> L
         raise ConfigError(_format_validation_error(exc)) from None
 
     base = base_dir or Path.cwd()
+    kb: KicadBoard | None = None
+    if spec.kicad is not None:
+        kb = _read_kicad(spec.kicad, base)
     try:
         db = MaterialDB.load(*(base / p for p in spec.material_files))
+        if kb is not None:
+            db = db.merged(_kicad_materials(kb, db))
         db = db.merged(spec.materials)
     except FileNotFoundError as exc:
         raise ConfigError(f"material_files: file not found: {exc.filename}") from None
     except MaterialError as exc:
         raise ConfigError(f"materials: {exc}") from None
 
-    problems = _check_materials(spec, db)
+    stack = _stack_from_spec(spec) or (kb.stackup if kb is not None else ())
+    problems = _check_materials(spec, db, stack)
     if problems:
         raise ConfigError("\n".join(problems))
 
-    board = _build_board(spec)
+    board = _build_board(spec, kb)
     mech_link: MechanicalLink | None = None
     if spec.mechanical is not None:
         board, mech_link = _apply_mechanical(spec.mechanical, board, base_dir or Path.cwd())
@@ -658,7 +779,72 @@ def load_config_dict(data: Mapping[str, Any], base_dir: Path | None = None) -> L
         output_dir=out_dir if out_dir.is_absolute() else base / out_dir,
         options={k: dict(v) for k, v in a.options.items()},
     )
-    return LoadedConfig(board=board, materials=db, analysis=analysis, mechanical=mech_link)
+    info = None
+    if kb is not None:
+        info = KicadInfo(
+            path=kb.path,
+            counts=kb.counts,
+            notes=tuple(kb.notes),
+            min_width=kb.min_width,
+            footprints=tuple(kb.footprints),
+        )
+    return LoadedConfig(
+        board=board, materials=db, analysis=analysis, mechanical=mech_link, kicad=info
+    )
+
+
+def _read_kicad(ks: KicadSpec, base: Path) -> KicadBoard:
+    from dataclasses import replace
+
+    from pcbsim.io.kicad import read_kicad
+
+    path = Path(ks.file)
+    kb = read_kicad(path if path.is_absolute() else base / path, origin=ks.origin)
+    if ks.vias:
+        kb = replace(kb, vias=tuple(_via_override(v, ks.vias, kb) for v in kb.vias))
+    if ks.nets is None:
+        return kb
+    wanted = {kb.resolve_net(n) for n in ks.nets}
+    unknown = sorted(wanted - {n.name for n in kb.nets})
+    if unknown:
+        raise ConfigError(f"kicad.nets: not in the KiCad file: {unknown}")
+    return replace(
+        kb,
+        nets=tuple(n for n in kb.nets if n.name in wanted),
+        shapes=tuple(s for s in kb.shapes if s.net in wanted),
+        vias=tuple(v for v in kb.vias if v.net in wanted),
+    )
+
+
+def _via_override(v: Via, rules: Sequence[KicadViaSpec], kb: KicadBoard) -> Via:
+    from dataclasses import replace
+
+    for r in rules:
+        if r.net is not None and kb.resolve_net(r.net) != v.net:
+            continue
+        if r.drill is not None and abs(r.drill - v.drill) > 1e-6:
+            continue
+        v = replace(
+            v,
+            plating_thickness=r.plating if r.plating is not None else v.plating_thickness,
+            material=r.material or v.material,
+            filled=r.filled if r.filled is not None else v.filled,
+            filler=r.filler if r.filler is not None else v.filler,
+        )
+    return v
+
+
+def _kicad_materials(kb: KicadBoard, db: MaterialDB) -> dict[str, dict[str, Any]]:
+    """``kicad:<layer>`` materials: a DB base material with the file's εr / tanδ."""
+    from dataclasses import asdict
+
+    out: dict[str, dict[str, Any]] = {}
+    for name, props in kb.materials.items():
+        base = asdict(db[props["base"]])
+        base.pop("name")
+        base["description"] = f"{name} (KiCad stack-up, based on {props['base']})"
+        out[name] = {**base, **{k: v for k, v in props.items() if k != "base"}}
+    return out
 
 
 def _apply_mechanical(ms: MechanicalSpec, board: Board, base: Path) -> tuple[Board, MechanicalLink]:
@@ -716,16 +902,21 @@ def _apply_mechanical(ms: MechanicalSpec, board: Board, base: Path) -> tuple[Boa
 
 
 def load_config(path: str | Path) -> LoadedConfig:
-    """Load and validate a YAML config file."""
+    """Load and validate a YAML config file, or a bare ``.kicad_pcb`` (geometry only)."""
     p = Path(path)
-    try:
-        text = p.read_text("utf-8")
-    except FileNotFoundError:
-        raise ConfigError(f"config file not found: {p}") from None
-    try:
-        data = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise ConfigError(f"{p}: YAML syntax error: {exc}") from None
+    if p.suffix == ".kicad_pcb":
+        if not p.exists():
+            raise ConfigError(f"KiCad file not found: {p}")
+        data: Any = {"name": p.stem, "kicad": {"file": p.name}}
+    else:
+        try:
+            text = p.read_text("utf-8")
+        except FileNotFoundError:
+            raise ConfigError(f"config file not found: {p}") from None
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise ConfigError(f"{p}: YAML syntax error: {exc}") from None
     loaded = load_config_dict(data, base_dir=p.parent.resolve())
     return LoadedConfig(
         loaded.board,
@@ -733,4 +924,5 @@ def load_config(path: str | Path) -> LoadedConfig:
         loaded.analysis,
         source=p.resolve(),
         mechanical=loaded.mechanical,
+        kicad=loaded.kicad,
     )

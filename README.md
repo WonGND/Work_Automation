@@ -2,7 +2,7 @@
 
 Open-source PCB multiphysics simulator, written in Python 3.11+.
 
-pcbsim reads a board description (a YAML config now, KiCad `.kicad_pcb` later), meshes the copper layers, and runs physics solvers through a plugin interface:
+pcbsim reads a board description (a YAML config, or a KiCad `.kicad_pcb` plus a small YAML overlay), meshes the copper layers, and runs physics solvers through a plugin interface:
 
 | solver      | physics                                                         | status   |
 | ----------- | --------------------------------------------------------------- | -------- |
@@ -31,6 +31,12 @@ pcbsim check examples/soc_4layer.yaml   # validate the config and print a board 
 pcbsim solvers                          # list registered solver plugins
 pcbsim run examples/soc_4layer.yaml     # dc_ir + thermal + coupled + si → results/ (JSON, NPZ, PNG)
 pcbsim run examples/soc_4layer.yaml --solver si   # one solver only
+pcbsim report results/                  # → results/report.html (self-contained, offline)
+pcbsim report results/ --out out/soc.html
+
+# KiCad board + electrical overlay (sources, loads, power) — examples/kicad
+pcbsim check examples/kicad/soc_4layer.kicad_pcb     # inspect the geometry import
+pcbsim run   examples/kicad/soc_kicad.yaml
 
 # impedance calculator, no config needed (lengths in mm, or with units)
 pcbsim z0 microstrip -w 0.36 -H 0.2 -t 35um --er 4.2
@@ -42,9 +48,11 @@ pcbsim match --gerber examples/mech/gerber --mech examples/mech/mech.dxf \
 pcbsim run examples/mech/soc_with_mech.yaml   # add --force to simulate despite an NG match
 ```
 
-`coupled` iterates `dc_ir` with ρ(T) and `thermal` with the resulting Joule heat until both fields stop changing. It prints the per-pass ΔT/ΔV history and the coupled-vs-uncoupled IR drop and Tj, and writes `coupled_convergence.png`. `pcbsim report` (stage 7) is a placeholder that exits with code 3, so use the files in `results/` for now.
+`coupled` iterates `dc_ir` with ρ(T) and `thermal` with the resulting Joule heat until both fields stop changing. It prints the per-pass ΔT/ΔV history and the coupled-vs-uncoupled IR drop and Tj, and writes `coupled_convergence.png`.
 
-Exit codes: 0 pass, 1 invalid input, 2 usage, 3 not implemented, 4 design violations / NG, 5 run refused because the linked ECAD–MCAD match is NG.
+`pcbsim report <results-dir>` reads `results.json` and the PNG heat maps (nothing is re-simulated or changed) and writes one HTML file with every image embedded: summary and verdict, violations and warnings, per-net source/sink IR-drop tables, via currents, component Tj, the coupled convergence history and coupled-vs-uncoupled values, the SI line table, and the heat maps with a quantity/layer filter. Solvers that did not run are shown as "not run"; values missing from `results.json` show as "–" and are never estimated. It exits 0 when no check failed and 4 when there are violations. Warnings alone do not fail the run.
+
+Exit codes: 0 pass, 1 invalid input (incl. a missing or broken `results.json`), 2 usage, 3 not implemented, 4 design violations / NG, 5 run refused because the linked ECAD–MCAD match is NG.
 
 ## Config format
 
@@ -57,13 +65,13 @@ pcbsim/
   model/      Board, Stackup, Layer, Net, Shape(Polygon), Via, Component, Port, Criteria
   io/         YAML config loader (pydantic v2); Gerber X2/X3, Excellon, PnP CSV;
               DXF (ezdxf), DWG via ODA/LibreDWG, STEP via cadquery (optional);
-              KiCad parser in stage 6
+              KiCad .kicad_pcb (sexpr.py, kicad.py)
   registration/  ECAD–MCAD registration, checks, report, thermal boundaries
   materials/  YAML material DB (σ, α, εr, tanδ, k, ρ, cp, ε)
   mesh/       2.5D per-layer grids
   si/         transmission lines: closed forms, 2D FEM cross-section, stack-up mapping
   solvers/    Solver ABC + registry (entry-point group "pcbsim.solvers"): dc_ir, thermal, coupled, si
-  post/       heat maps, reports
+  post/       heat maps, convergence plot, HTML results report (report.py, results_loader.py)
   cli.py      `pcbsim` command
 ```
 

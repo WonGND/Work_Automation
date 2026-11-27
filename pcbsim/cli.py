@@ -1,6 +1,6 @@
 """Command-line interface.
 
-    pcbsim check  config.yaml           validate a config and print a board summary
+    pcbsim check  config.yaml           validate a config (or a bare .kicad_pcb) and print a summary
     pcbsim run    config.yaml           run the configured solvers, write results/
     pcbsim report results/              build HTML/JSON reports (stage 7)
     pcbsim match  --gerber dir/ --drill x.drl --mech mech.dwg --map layers.yaml --report out.html
@@ -84,6 +84,14 @@ def summarize(cfg: LoadedConfig) -> str:
     )
     if cfg.source is not None:
         out.append(f"  source  {cfg.source}")
+    if cfg.kicad is not None:
+        kc = cfg.kicad.counts
+        out.append(
+            f"  KiCad   {cfg.kicad.path.name}: {kc.get('tracks', 0)} tracks, "
+            f"{kc.get('vias', 0)} vias (+{kc.get('plated_holes', 0)} plated holes), "
+            f"{kc.get('pads', 0)} pads, {kc.get('zones', 0)} zones, "
+            f"{kc.get('footprints', 0)} footprints"
+        )
 
     out.append("\nStack-up (top → bottom)")
     rows = []
@@ -195,6 +203,22 @@ def _model_checks(cfg: LoadedConfig) -> list[tuple[bool, str]]:
     for name in cfg.analysis.solvers:
         if name not in known:
             checks.append((False, f"solver {name!r} is not available yet"))
+    if cfg.kicad is not None:
+        for note in cfg.kicad.notes:
+            checks.append((False, f"KiCad: {note}"))
+        cell = cfg.analysis.mesh.cell / cfg.analysis.mesh.refine
+        thin = {n: w for n, w in cfg.kicad.min_width.items() if w < cell}
+        modelled = {s.net for s in b.shapes} & {p.net for p in b.ports}
+        for net_name, w in sorted(thin.items()):
+            if net_name in modelled:
+                checks.append(
+                    (
+                        False,
+                        f"KiCad: net {net_name} has {_mm(w)} mm tracks, narrower than the mesh "
+                        "cell "
+                        f"{_mm(cell)} mm — they may vanish; refine analysis.mesh",
+                    )
+                )
     return checks
 
 
@@ -539,8 +563,36 @@ def cmd_z0(args: argparse.Namespace, out: TextIO) -> int:
 
 
 def cmd_report(args: argparse.Namespace, out: TextIO) -> int:
-    print("pcbsim report: not implemented yet (arrives in stage 7).", file=sys.stderr)
-    return EXIT_NOT_IMPLEMENTED
+    """Render ``<results>/report.html`` from a ``pcbsim run`` output directory."""
+    from pcbsim.post.report import default_report_path, verdict, write_report
+    from pcbsim.post.results_loader import RESULTS_FILE, load_results
+
+    res = load_results(Path(args.results))
+    target = Path(args.out) if args.out else default_report_path(res.directory)
+    if target.suffix.lower() not in (".html", ".htm"):
+        print(f"error: --out must be an .html file, got {target}", file=sys.stderr)
+        return EXIT_USAGE
+    if target.resolve() == (res.directory / RESULTS_FILE).resolve():
+        print("error: --out would overwrite results.json", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        written = write_report(res, target)
+    except OSError as exc:
+        print(f"error: cannot write {target}: {exc.strerror or exc}", file=sys.stderr)
+        return EXIT_INVALID
+    v = verdict(res)
+    board = res.doc.get("board") or "-"
+    print(f"Board  {board}   solvers: {', '.join(res.solvers) or '-'}", file=out)
+    print(
+        f"  {v.violations} violation(s), {v.warnings} warning(s), "
+        f"{len(res.images)} image(s) embedded",
+        file=out,
+    )
+    for note in res.notes:
+        print(f"  [warn] {note}", file=out)
+    print(f"Wrote {written}", file=out)
+    print("PASS" if v.passed else f"FAIL ({v.violations} violation(s))", file=out)
+    return EXIT_OK if v.passed else EXIT_VIOLATIONS
 
 
 def cmd_match(args: argparse.Namespace, out: TextIO) -> int:
@@ -640,8 +692,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     r.set_defaults(func=cmd_run)
 
-    rep = sub.add_parser("report", help="build HTML/JSON reports from a results directory")
-    rep.add_argument("results")
+    rep = sub.add_parser(
+        "report",
+        help="build a self-contained HTML report from a results directory",
+        description=(
+            "Read results.json and the PNG heat maps written by `pcbsim run` (nothing is "
+            "re-simulated or modified) and write one HTML file with every image embedded. "
+            "Exit 0 when no check failed, 4 when the results contain violations, "
+            "1 when results.json is missing or unreadable."
+        ),
+    )
+    rep.add_argument("results", help="directory written by `pcbsim run` (or its results.json)")
+    rep.add_argument("--out", help="HTML file to write (default: <results>/report.html)")
     rep.set_defaults(func=cmd_report)
 
     m = sub.add_parser("match", help="register a mechanical drawing to Gerber/Excellon and check")

@@ -1,6 +1,6 @@
 # pcbsim — handoff for the next session
 
-This file lets a new conversation (or another engineer) continue the work without the chat history. Last updated: 2026-10-26 (stage 4).
+This file lets a new conversation (or another engineer) continue the work without the chat history. Last updated: 2026-11-27 (stage 7).
 
 ## Repository
 
@@ -8,8 +8,9 @@ This file lets a new conversation (or another engineer) continue the work withou
 * Branches:
   * `feat/ecad-mcad-registration`, PR #5: stages 1–3 (imported from the ZIP) plus the ECAD–MCAD registration module.
   * `feat/si-impedance`, PR #6, branched from the branch above: stage 5 (signal integrity). Stacked on #5 (base = `feat/ecad-mcad-registration`).
-  * `feat/coupled-electrothermal`, branched from `feat/si-impedance`: stage 4 (electro-thermal coupling). Its PR is stacked on #6 (base = `feat/si-impedance`).
-* Merge order: #5 → #6 → the stage-4 PR. After each merge, retarget the next PR's base to `main`.
+  * `feat/coupled-electrothermal`, PR #7, branched from `feat/si-impedance`: stage 4 (electro-thermal coupling). Stacked on #6.
+  * `feat/kicad-input`, branched from `feat/coupled-electrothermal`: stage 6 (KiCad input). Its PR is stacked on #7 (base = `feat/coupled-electrothermal`). Stage 7 (report) is also on this branch.
+* Merge order: #5 → #6 → #7 → the stage-6 PR. After each merge, retarget the next PR's base to `main`.
 * #5 and #6 contain `wip` commits because the workspace was restored several times. Squash on merge.
 
 ## Setup
@@ -17,7 +18,7 @@ This file lets a new conversation (or another engineer) continue the work withou
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"            # or: pip install -r requirements-lock.txt shapely ezdxf types-shapely && pip install -e . --no-deps
-pytest && ruff check . && ruff format --check . && mypy     # 373 passed, 1 skipped (STEP: cadquery not installed)
+pytest && ruff check . && ruff format --check . && mypy     # 417 passed, 3 skipped (STEP: cadquery not installed); on Windows set PYTHONUTF8=1
 ```
 
 ## Original requirements (summary of the user's prompt)
@@ -33,11 +34,11 @@ Open-source PCB multiphysics simulator `pcbsim`, Python 3.11+:
   1. skeleton, data model, material DB, YAML loader — done
   2. `dc_ir` — done
   3. `thermal` — done
-  4. `coupled` electro-thermal — **done (`feat/coupled-electrothermal`)**
+  4. `coupled` electro-thermal — done (`feat/coupled-electrothermal`)
   5. `si` closed forms + 2D FEM — done (`feat/si-impedance`)
-  6. KiCad `.kicad_pcb` input — **next**
-  7. HTML/JSON report + CLI `pcbsim report` — not started (`report` is a stub, exit 3)
-  8. optional Streamlit GUI, openEMS — not started
+  6. KiCad `.kicad_pcb` input — **done (`feat/kicad-input`)**
+  7. HTML report + CLI `pcbsim report` — **done (`feat/kicad-input`)**; `results.json` stays the JSON output
+  8. optional Streamlit GUI, openEMS — **next**, not started
 * Extra request (done, PR #5): ECAD–MCAD registration module — Gerber X2/X3, Excellon, DXF, DWG via converters, STEP optional; RANSAC → Umeyama → ICP; checks; HTML/JSON report; thermal BCs from heat sinks, chassis, and case; `pcbsim match`; `pcbsim run` refuses an NG match unless `--force`.
 
 ## Code map
@@ -46,7 +47,9 @@ Open-source PCB multiphysics simulator `pcbsim`, Python 3.11+:
 pcbsim/
   model/        Board, Stackup, Layer, Net, Shape, Via, Component, Port, ThermalBoundary,
                 TransmissionLine, Criteria (all SI, frozen dataclasses; Board.validate())
-  io/config.py  pydantic v2 schema → Board; units parsed at the boundary; `mechanical:` link
+  io/config.py  pydantic v2 schema → Board; units parsed at the boundary; `mechanical:` link;
+                `kicad:` section (KiCad geometry + YAML electrical overlay)
+  io/sexpr.py   S-expression reader;  io/kicad.py  .kicad_pcb → stack-up, outline, copper, vias, footprints
   io/           gerber.py excellon.py pnp.py dxf.py dwg.py step.py mech.py cad.py (types)
   materials/    YAML DB (σ, α, εr, tanδ, k, ρ, cp, ε)
   mesh/         2.5D structured grid per conductor layer
@@ -55,12 +58,15 @@ pcbsim/
                 xsection.py (stack-up → cross-section, formula choice + accuracy)
   registration/ transform, solve (RANSAC/Umeyama/ICP), features, checks, thermal_bc,
                 pipeline (match.json), report (HTML+SVG), layermap
-  post/         heatmap.py (per-layer PNG), convergence.py (coupled ΔT/ΔV plot)
+  post/         heatmap.py (per-layer PNG), convergence.py (coupled ΔT/ΔV plot),
+                results_loader.py + report.py + report_sections.py + html_kit.py (`pcbsim report`)
   runner.py     config → mesh → solvers → results.json/npz/png
-  cli.py        check | run [--solver --force] | match | z0 | report (stub) | solvers
-tests/          one file per module; cad_fixtures.py generates KiCad/FreeCAD-style files
-examples/       soc_4layer.yaml; mech/ (gerber, mech.dxf, layers.yaml, match.json, report)
-docs/           theory.md (§1–8 + references), config.md, registration.md, HANDOFF.md
+  cli.py        check | run [--solver --force] | match | z0 | report [--out] | solvers
+tests/          one file per module; cad_fixtures.py generates KiCad/FreeCAD-style Gerber/DXF,
+                kicad_fixtures.py generates .kicad_pcb boards (examples/kicad/)
+examples/       soc_4layer.yaml; mech/ (gerber, mech.dxf, layers.yaml, match.json, report);
+                kicad/ (soc_4layer.kicad_pcb + soc_kicad.yaml overlay)
+docs/           theory.md (§1–9 + references), config.md, registration.md, HANDOFF.md
 ```
 
 ## Stage 5 (SI): what was built
@@ -77,6 +83,7 @@ docs/           theory.md (§1–8 + references), config.md, registration.md, HA
 
 * SI: no conductor loss, frequency dependence, or surface roughness (DC/quasi-TEM only); coplanar waveguide is not modelled; an offset differential stripline is checked only against IPC (±10 %).
 * Registration: IPC-2581/ODB++ not implemented; STEP gives bounding boxes only; one drawing = one board side. E2E tests use generated KiCad/FreeCAD-format files, not real exports.
+* KiCad: tested on generated KiCad-8-format files, not yet on boards saved by a real KiCad install. Footprint graphics, text, dimensions and keep-outs are ignored. Trapezoid pads use their bounding box, and the barrel inside a through-hole pad is not removed from the copper. Thermal properties of KiCad dielectrics come from fr4/ro4350b. Via plating and fill come from `kicad.vias` because the file doesn't store them.
 * Coupled: steady state only (a transient thermal option is forced to steady with an info note). Current sinks are fixed-current loads, so the coupling always converges unless αK ≥ 1 (runaway, reported). Constant-power loads (I = P/V) are not modelled.
 
 ## Stage 4 (coupled): what was built
@@ -93,17 +100,42 @@ docs/           theory.md (§1–8 + references), config.md, registration.md, HA
 * Example board: converges in 2 passes (κ ≈ 0.002). SOC_CORE drop goes from 1.146 % to 1.272 %, Joule loss from 67.5 to 74.9 mW, and T_max rises by +0.06 K.
 * Tests (`tests/test_coupled.py`): lumped analytic fixed point T* = T_a + K[1+α(T_a−T_ref)]/(1−αK) to 1e-3 K; κ = αK to 1 %; α = 0 equals the uncoupled result; the hotter case gives a higher drop; self-consistency of the fixed point; relaxation; runaway; non-convergence; CLI.
 
-## Next step (stage 6: KiCad `.kicad_pcb` input)
+## Stage 6 (KiCad input): what was built
 
-Parse the KiCad S-expression board file (public format docs: <https://dev-docs.kicad.org/en/file-formats/sexpr-pcb/>) into the same `Board` the YAML loader produces:
+* `pcbsim/io/sexpr.py`: S-expression reader (quoted/bare atoms, escapes, errors with context).
+* `pcbsim/io/kicad.py`: `read_kicad(path, origin)` → `KicadBoard`. It reads:
+  * stack-up incl. dielectric sub-layers, εr and tanδ (into `kicad:<layer>` materials)
+  * user layer names (`L1_TOP` instead of `F.Cu`)
+  * Edge.Cuts outline with arcs and cutouts
+  * nets (GND-like names become ground)
+  * tracks and track arcs, buffered
+  * pads: rect, circle, oval, roundrect, custom; plated holes become vias
+  * filled zones; unfilled zones are approximated with a note
+  * blind and through vias with annular rings
+  * footprints: courtyard (else pad hull), side, pad nets
 
-* stack-up from `(setup (stackup ...))`
-* outline from `Edge.Cuts`
-* nets
-* zones (filled polygons) and tracks/arcs (buffered to polygons with shapely)
-* vias with drill and layer pair
-* footprints with pads, giving component footprints and port regions
+  Coordinates are flipped to y-up, with the board's lower-left corner at (0, 0) by default.
+* Config: a new `kicad:` section with `file`, `origin`, `nets` filter, `components: listed|all`, and `vias` plating/fill rules.
+  * `board.outline` / `board.stackup` become optional and act as overrides.
+  * `components` may omit geometry (it comes from the footprint).
+  * Nets, layers, and refs in ports, boundaries, and lines resolve against the file.
+  * A bare `.kicad_pcb` passed to `check` or `run` is loaded geometry-only.
+* `pcbsim check` prints import counts and notes, and warns about tracks narrower than the mesh on nets that carry ports.
+* Example `examples/kicad/` (generated by `python -m tests.kicad_fixtures examples/kicad`): the SoC board as a KiCad 8 file plus an overlay. It reproduces the YAML example's DC result to 1e-9, with Tj within 0.1 K (the extra annular rings and pads are the only difference).
+* Tests (`tests/test_kicad.py`, 31): parser, arc tolerance, pad areas vs closed forms, outline with arcs and cutout, rotation and bottom side, origins, through-hole pads, unfilled zones, missing stack-up, KiCad 9 net syntax, overlay merging and errors, physics parity, CLI.
 
-Electrical intent that KiCad does not store (sources, sinks, power, θ values, criteria, analysis) comes from a small YAML overlay that references KiCad refs and nets. Tests should use generated `.kicad_pcb` fixtures in the style of `tests/cad_fixtures.py`.
+## Stage 7 (report): what was built
+
+* `pcbsim report <results-dir|results.json> [--out file.html]`, default `<results-dir>/report.html`. Read-only: it never re-runs solvers or changes `results.json`.
+* `pcbsim/post/results_loader.py` validates the envelope (`pcbsim_version` with the same major version, `solvers` object, per-solver list/object types). It raises `ResultsError` (exit 1) with the file, line and column for broken JSON, and a hint to run `pcbsim run` when the file is missing. PNGs directly in the folder are embedded as data URIs after a magic-byte, size (15 MB each, 80 MB total) and no-symlink-escape check; skipped files are listed in the report.
+* `pcbsim/post/report.py` + `report_sections.py`, `html_kit.py`: summary, violations vs warnings (separate tables, badges with text), per-net source/sink IR-drop tables + per-layer J_max, vias (top 25 by utilisation, rest collapsed), components (Tj in °C, margin), coupled status/history table + inline SVG semilog chart + `coupled_convergence.png` + coupled-vs-uncoupled table, SI line table, heat maps with a quantity/layer filter, info notes and a raw scalars appendix. All text is escaped; null/non-finite values show as "–". Inline CSS + ~20 lines of JS (sorting, filter); no network resources.
+* Verdict: FAIL when any `violation` severity exists or `passed` is false (exit 4); warnings alone PASS (exit 0). `--out` must end in `.html` and must not be `results.json` (exit 2).
+* Tests: `tests/test_report.py` (15) — success path, escaping, `--out`, violations, warnings-only, partial solvers + nulls/NaN, missing dir/file, six kinds of broken JSON.
+* Limits: coupled tolerances (tol_t/tol_v) are not in `results.json`, so the report points to the config. With several sources on one net, `results.json` does not say which source feeds which sink, and the report says so. No separate `report.json` was added. Visual check on a phone-width browser not done yet (the layout uses a responsive grid and horizontally scrolling tables).
+* On Windows, run the test suite with `PYTHONUTF8=1`: some older tests read files with the locale codec (cp949 here).
+
+## Next step (stage 8: optional Streamlit GUI, openEMS)
+
+Not started. Note: `origin/feat/report-gui-tool` holds an earlier unreviewed automated draft (`pcbsim/report.py`, `pcbsim/gui/theme.py`); it was not used for stage 7.
 
 Working conventions used so far: module docstrings with formulas and sources, a theory.md section per stage, tests against analytic solutions, the example config updated, and a stop for user confirmation after each stage.

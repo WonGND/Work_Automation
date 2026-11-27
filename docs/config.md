@@ -90,6 +90,36 @@ analysis:
 
 Material properties (SI): `sigma`, `alpha_r`, `t_ref` [K], `eps_r`, `tan_d`, `k_inplane`, `k_through` (or the shorthand `k`), `density`, `cp`, `emissivity`, `description`, `source`.
 
+### `kicad` (optional) — geometry from a KiCad board
+
+With a `kicad:` section the board outline, stack-up, nets, copper (zones, tracks, pads), vias and footprints come from a `.kicad_pcb` file (KiCad 6–9). The YAML then only adds what KiCad does not store: net voltages, sources and loads, component power and θ values, thermal boundaries, criteria and analysis. See [theory.md §9](theory.md) for the geometry mapping.
+
+```yaml
+kicad:
+  file: board.kicad_pcb    # relative to this config
+  origin: board            # board: lower-left of Edge.Cuts = (0, 0) | aux: drill/place origin | file
+  nets: [VDD_1V0, GND]     # optional: import copper of these nets only (faster, smaller mesh)
+  components: listed       # listed: footprints named under 'components' | all: every footprint
+  vias:                    # KiCad stores no plating or fill; rules apply in order
+    - { net: GND, drill: 0.3, filled: true, filler: via_fill_epoxy }
+    - { plating: 20 um }   # no net/drill: every via
+
+nets:                      # merged by name with the KiCad nets (adds voltage / kind)
+  - { name: VDD_1V0, kind: power, voltage: 1.0 }
+components:                # footprint geometry and side come from the board file
+  - { ref: U1, power: 4 W, theta_jc: 0.5, theta_jb: 3 }
+ports:                     # 'layer' accepts the KiCad user name (L1_TOP) or canonical (F.Cu)
+  - { name: LOAD, kind: current_sink, net: VDD_1V0, layer: F.Cu, component: U1, current: 6 A }
+```
+
+* `board.outline` / `board.stackup` are optional with `kicad:`; when given they replace the file's outline / stack-up.
+* `shapes` and `vias` in the YAML are added to the imported copper.
+* Net names match with or without KiCad's leading `/` (hierarchical nets).
+* `pcbsim check board.kicad_pcb` (or `run`) also accepts a bare board file — geometry only, useful for inspecting the import.
+* `pcbsim check` lists import notes (unfilled zones, missing stack-up, unknown dielectric names) and warns when a net that carries a port has tracks narrower than the mesh cell.
+
+Dielectrics become materials `kicad:<layer>` (based on `fr4`, or `ro4350b` if the KiCad material name says so, with the file's εr and tanδ); override them like any other material, e.g. `materials: { "kicad:dielectric 1": { k_through: 0.35 } }`.
+
 ### `mechanical` (optional)
 
 Links a `pcbsim match --json` result (see [registration.md](registration.md)):

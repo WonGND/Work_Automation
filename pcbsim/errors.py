@@ -40,3 +40,7 @@ class SolverError(PcbsimError):
 
 class CadFormatError(PcbsimError, ValueError):
     """A CAD/CAM input file (Gerber, Excellon, DXF, DWG, STEP) is malformed or unsupported."""
+
+
+class ResultsError(PcbsimError):
+    """A results directory (``results.json`` + PNG/NPZ) is missing, malformed or unsupported."""
